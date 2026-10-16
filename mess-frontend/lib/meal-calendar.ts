@@ -9,41 +9,36 @@ export function dhakaToday(now = new Date()) {
   return `${value('year')}-${value('month')}-${value('day')}`
 }
 
+export function isBotVoteLocked(mealType: 'lunch' | 'dinner', date: string, now = new Date()) {
+  if (date !== dhakaToday(now)) return true
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Dhaka', hour: 'numeric', minute: 'numeric', hourCycle: 'h23',
+  }).formatToParts(now)
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? 0)
+  const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? 0)
+  return hour * 60 + minute >= (mealType === 'lunch' ? 10 : 15) * 60
+}
+
 export function validDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
   const parsed = new Date(`${value}T00:00:00.000Z`)
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
 }
 
-export function monthBounds(monthKey: string) {
-  const [year, month] = monthKey.split('-').map(Number)
-  const endDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
-  return {
-    start: `${monthKey}-01`,
-    end: `${monthKey}-${String(endDay).padStart(2, '0')}`,
-  }
-}
-
 type MealValue = { count: number; lunchCount?: number | null; dinnerCount?: number | null }
 
-export function resolveMealCount({ manual, planned, date, autoStart, today }: {
+export function resolveMealCount({ manual }: {
   manual?: MealValue
-  planned?: MealValue
-  date: string
-  autoStart: string
-  today: string
-}): { count: number; lunchCount: number; dinnerCount: number; unassignedCount: number; source: 'manual' | 'planned' | 'automatic' } {
-  const saved = manual ?? planned
-  if (saved) {
-    const source = manual ? 'manual' : 'planned'
-    if (saved.lunchCount != null && saved.dinnerCount != null) {
-      return { count: saved.lunchCount + saved.dinnerCount, lunchCount: saved.lunchCount, dinnerCount: saved.dinnerCount, unassignedCount: 0, source }
+}): { count: number; lunchCount: number; dinnerCount: number; unassignedCount: number; source: 'manual' | 'automatic' } {
+  if (manual) {
+    if (manual.lunchCount != null && manual.dinnerCount != null) {
+      return { count: manual.lunchCount + manual.dinnerCount, lunchCount: manual.lunchCount, dinnerCount: manual.dinnerCount, unassignedCount: 0, source: 'manual' }
     }
     // Older records contain only a daily total. One or three meals cannot be assigned to a sitting safely.
-    const lunchCount = saved.count === 2 ? 1 : 0
-    const dinnerCount = saved.count === 2 ? 1 : 0
-    return { count: saved.count, lunchCount, dinnerCount, unassignedCount: saved.count - lunchCount - dinnerCount, source }
+    const lunchCount = manual.count === 2 ? 1 : 0
+    const dinnerCount = manual.count === 2 ? 1 : 0
+    return { count: manual.count, lunchCount, dinnerCount, unassignedCount: manual.count - lunchCount - dinnerCount, source: 'manual' }
   }
-  // If member has not voted or has no manual/planned entry, meal count defaults to 0
+  // Without a vote or manual entry, both meals are 0.
   return { count: 0, lunchCount: 0, dinnerCount: 0, unassignedCount: 0, source: 'automatic' }
 }

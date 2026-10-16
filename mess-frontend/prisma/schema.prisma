@@ -16,7 +16,6 @@ model Mess {
   password    String
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
-  autoMealStartDate String?
   whatsappGroupId   String?
   members     Member[]
   days        MealDay[]
@@ -26,7 +25,6 @@ model Mess {
   houseRents  HouseRent[]
   actualGroceries ActualGrocery[]
   marketDuties MarketDuty[]
-  mealSchedules MealSchedule[]
 }
 
 model Member {
@@ -37,18 +35,20 @@ model Member {
   initials    String
   color       String
   phone       String?
+  whatsappLid String?
+  linkCodeHash String?
+  linkCodeExpiresAt DateTime?
   houseRent   Float        @default(0)
-  autoMealStartDate String?
   mess        Mess         @relation(fields: [messId], references: [id], onDelete: Cascade)
   meals       MealEntry[]
   expenses    Expense[]
   overrides   Override[]
   houseRents  HouseRent[]
   marketDuties MarketDuty[]
-  mealSchedules MealSchedule[]
   @@unique([messId, externalId])
   @@index([messId])
   @@index([phone])
+  @@index([whatsappLid])
 }
 
 model MealDay {
@@ -72,24 +72,6 @@ model MealEntry {
   day      MealDay  @relation(fields: [dayId], references: [id], onDelete: Cascade)
   member   Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
   @@unique([dayId, memberId])
-}
-
-model MealSchedule {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  messId    String   @db.ObjectId
-  memberId  String   @db.ObjectId
-  startDate String
-  endDate   String
-  count     Int
-  lunchCount Int?
-  dinnerCount Int?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  mess      Mess     @relation(fields: [messId], references: [id], onDelete: Cascade)
-  member    Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
-
-  @@index([messId, startDate, endDate])
-  @@index([memberId, startDate, endDate])
 }
 
 model Expense {

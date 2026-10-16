@@ -7,6 +7,10 @@ let isSchedulerRunning = false
 let currentSock: WASocket | null = null
 let currentGetGroupJid: (() => string | null) | null = null
 
+export function pauseScheduler() {
+  currentSock = null
+}
+
 export function setupScheduler(sock: WASocket, getGroupJid: () => string | null) {
   currentSock = sock
   currentGetGroupJid = getGroupJid
@@ -20,9 +24,9 @@ export function setupScheduler(sock: WASocket, getGroupJid: () => string | null)
   const timezone = CONFIG.TIMEZONE
   console.log(`[Scheduler] Initializing cron scheduler with timezone: ${timezone}`)
 
-  // 1. Midnight (12:00 AM / 00:00) -> Send Lunch Poll
+  // 00:10 -> Send Lunch Poll
   cron.schedule(
-    '0 0 * * *',
+    '10 0 * * *',
     async () => {
       const sock = currentSock
       const groupJid = currentGetGroupJid?.()
@@ -30,8 +34,20 @@ export function setupScheduler(sock: WASocket, getGroupJid: () => string | null)
         console.warn('[Scheduler] Cannot send Lunch Poll: Socket or Group JID not ready')
         return
       }
-      console.log('[Scheduler] 12:00 AM: Triggering Lunch Poll...')
+      console.log('[Scheduler] 12:10 AM: Triggering Lunch Poll...')
       await pollManager.sendLunchPoll(sock, groupJid)
+    },
+    { timezone }
+  )
+
+  // 09:45 -> Remind members before the lunch cutoff
+  cron.schedule(
+    '45 9 * * *',
+    async () => {
+      const sock = currentSock
+      const groupJid = currentGetGroupJid?.()
+      if (!sock || !groupJid) return
+      await pollManager.sendClosingWarning(sock, groupJid, 'lunch')
     },
     { timezone }
   )
@@ -49,9 +65,9 @@ export function setupScheduler(sock: WASocket, getGroupJid: () => string | null)
     { timezone }
   )
 
-  // 3. Noon 12:00 PM (12:00) -> Send Dinner Poll
+  // 11:00 -> Send Dinner Poll
   cron.schedule(
-    '0 12 * * *',
+    '0 11 * * *',
     async () => {
       const sock = currentSock
       const groupJid = currentGetGroupJid?.()
@@ -59,8 +75,20 @@ export function setupScheduler(sock: WASocket, getGroupJid: () => string | null)
         console.warn('[Scheduler] Cannot send Dinner Poll: Socket or Group JID not ready')
         return
       }
-      console.log('[Scheduler] 12:00 PM: Triggering Dinner Poll...')
+      console.log('[Scheduler] 11:00 AM: Triggering Dinner Poll...')
       await pollManager.sendDinnerPoll(sock, groupJid)
+    },
+    { timezone }
+  )
+
+  // 14:45 -> Remind members before the dinner cutoff
+  cron.schedule(
+    '45 14 * * *',
+    async () => {
+      const sock = currentSock
+      const groupJid = currentGetGroupJid?.()
+      if (!sock || !groupJid) return
+      await pollManager.sendClosingWarning(sock, groupJid, 'dinner')
     },
     { timezone }
   )
@@ -78,10 +106,12 @@ export function setupScheduler(sock: WASocket, getGroupJid: () => string | null)
     { timezone }
   )
 
-  console.log('[Scheduler] All 4 daily routines scheduled successfully:')
-  console.log('  • 00:00 (12:00 AM) -> দুপুরের মিলের পোল যাবে')
+  console.log('[Scheduler] All 6 daily routines scheduled successfully:')
+  console.log('  • 00:10 (12:10 AM) -> দুপুরের মিলের পোল যাবে')
+  console.log('  • 09:45 (09:45 AM) -> দুপুরের ভোটের সতর্কবার্তা যাবে')
   console.log('  • 10:00 (10:00 AM) -> দুপুরের মিল লক হবে')
-  console.log('  • 12:00 (12:00 PM) -> রাতের মিলের পোল যাবে')
+  console.log('  • 11:00 (11:00 AM) -> রাতের মিলের পোল যাবে')
+  console.log('  • 14:45 (02:45 PM) -> রাতের ভোটের সতর্কবার্তা যাবে')
   console.log('  • 15:00 (03:00 PM) -> রাতের মিল লক হবে')
 }
 

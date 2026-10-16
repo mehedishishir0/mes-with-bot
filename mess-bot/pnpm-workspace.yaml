@@ -1,0 +1,5 @@
+allowBuilds:
+  esbuild: true
+  protobufjs: true
+patchedDependencies:
+  '@whiskeysockets/baileys@6.17.16': patches/baileys-lid-group-sessions.patch

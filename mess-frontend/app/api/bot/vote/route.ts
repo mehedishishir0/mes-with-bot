@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
-import { dhakaToday, validDate } from '@/lib/meal-calendar'
+import { dhakaToday, isBotVoteLocked, validDate } from '@/lib/meal-calendar'
 
 const voteSchema = z.object({
-  phone: z.string().trim().min(5),
+  phone: z.string().trim().min(5).optional(),
+  voterJid: z.string().trim().regex(/^\d+(?:@(?:lid|s\.whatsapp\.net))$/, 'Invalid voter JID').optional(),
   mealType: z.enum(['lunch', 'dinner']),
   count: z.number().int().min(0).max(10),
   date: z.string().refine(validDate, 'Invalid date format').optional(),
   groupId: z.string().optional(),
-})
+}).refine((value) => value.phone || value.voterJid, 'Voter identity is required')
 
 function normalizePhone(rawPhone: string) {
   const digits = rawPhone.replace(/\D/g, '')
@@ -21,17 +22,14 @@ function normalizePhone(rawPhone: string) {
 }
 
 function verifyAuth(request: Request) {
-  const secretKey = process.env.BOT_SECRET_KEY || 'mess_bot_secret_2026'
+  const secretKey = process.env.BOT_SECRET_KEY
+  if (!secretKey) return false
   const headerSecret = request.headers.get('x-bot-secret')
   const authHeader = request.headers.get('authorization')
   const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
-  const url = new URL(request.url)
-  const querySecret = url.searchParams.get('secret')
-
   return (
     headerSecret === secretKey ||
-    bearerToken === secretKey ||
-    querySecret === secretKey
+    bearerToken === secretKey
   )
 }
 
@@ -46,7 +44,9 @@ export async function POST(request: Request) {
     const json = await request.json()
     const input = voteSchema.parse(json)
 
-    const normalized = normalizePhone(input.phone)
+    const isLid = input.voterJid?.endsWith('@lid') ?? false
+    const lid = isLid ? input.voterJid!.split('@')[0] : null
+    const normalized = normalizePhone(input.phone || input.voterJid || '')
     const phoneVariants = [
       normalized,
       `+88${normalized}`,
@@ -54,10 +54,10 @@ export async function POST(request: Request) {
       normalized.replace(/^0/, ''),
     ]
 
-    // Find member by phone
+    // LIDs are opaque WhatsApp IDs, not phone numbers.
     const member = await prisma.member.findFirst({
       where: {
-        phone: { in: phoneVariants },
+        ...(lid ? { whatsappLid: lid } : { phone: { in: phoneVariants } }),
         ...(input.groupId ? { mess: { whatsappGroupId: input.groupId } } : {}),
       },
       include: {
@@ -68,7 +68,9 @@ export async function POST(request: Request) {
     if (!member) {
       return NextResponse.json(
         {
-          error: `মেম্বার পাওয়া যায়নি! ফোন নাম্বার (${input.phone}) কি ওয়েবসাইটে যুক্ত করা আছে?`,
+          error: lid
+            ? `মেম্বার পাওয়া যায়নি! ওয়েবসাইটের মেম্বার সেটিংসে WhatsApp LID (${lid}) যোগ করুন।`
+            : `মেম্বার পাওয়া যায়নি! ফোন নাম্বার (${input.phone || input.voterJid}) কি ওয়েবসাইটে যুক্ত করা আছে?`,
           normalizedPhone: normalized,
         },
         { status: 404 }
@@ -76,6 +78,15 @@ export async function POST(request: Request) {
     }
 
     const date = input.date ?? dhakaToday()
+    if (isBotVoteLocked(input.mealType, date)) {
+      return NextResponse.json({
+        success: false,
+        locked: true,
+        memberName: member.name,
+        error: 'এই বেলার ভোট লক করা হয়েছে।',
+      }, { status: 409 })
+    }
+
     const monthKey = date.slice(0, 7)
     const dayStr = date.slice(8, 10)
 

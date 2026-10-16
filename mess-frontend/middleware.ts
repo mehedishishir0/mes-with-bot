@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 const protectedPrefixes = ['/dashboard', '/meals', '/expenses', '/settings', '/api']
-const publicRoutes = ['/login', '/signup', '/', '/api/auth/login', '/api/auth/signup', '/api/auth/logout', '/api/auth/session']
+const publicRoutes = ['/login', '/signup', '/', '/api/auth/login', '/api/auth/signup', '/api/auth/logout', '/api/auth/session', '/api/bot/vote', '/api/bot/link', '/api/bot/member']
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl

@@ -1,15 +1,20 @@
 import { CONFIG } from './config.js'
 
 export type VotePayload = {
-  phone: string
+  voterJid: string
   mealType: 'lunch' | 'dinner'
   count: number
   date?: string
   groupId?: string
 }
 
+export type LinkResponse = { success: boolean; memberName?: string; error?: string }
+export type MemberResponse = { success: boolean; memberName?: string; error?: string }
+
 export type VoteResponse = {
   success: boolean
+  locked?: boolean
+  memberName?: string
   member?: {
     id: string
     name: string
@@ -55,11 +60,22 @@ export class ApiClient {
     this.secretKey = CONFIG.BOT_SECRET_KEY
   }
 
+  private async readJson<T extends { success: boolean; error?: string }>(res: Response, url: string): Promise<T> {
+    const contentType = res.headers.get('content-type') || ''
+    if (!contentType.includes('application/json')) {
+      return { success: false, error: `${url} returned HTTP ${res.status} (${contentType || 'no content type'}); check WEBSITE_API_URL and API routing` } as T
+    }
+    const data = await res.json() as T
+    if (!res.ok) return { ...data, success: false, error: data.error || `HTTP ${res.status}` }
+    return data
+  }
+
   async sendVote(payload: VotePayload): Promise<VoteResponse> {
     const url = `${this.baseUrl}/api/bot/vote`
     try {
       const res = await fetch(url, {
         method: 'POST',
+        redirect: 'manual',
         headers: {
           'Content-Type': 'application/json',
           'x-bot-secret': this.secretKey,
@@ -67,20 +83,44 @@ export class ApiClient {
         body: JSON.stringify(payload),
       })
 
-      const data = await res.json()
-      if (!res.ok) {
-        return {
-          success: false,
-          error: data.error || `HTTP error ${res.status}`,
-        }
-      }
-      return data
+      return await this.readJson<VoteResponse>(res, url)
     } catch (err) {
       console.error('[ApiClient] Error sending vote to website:', err)
       return {
         success: false,
         error: err instanceof Error ? err.message : 'Network error',
       }
+    }
+  }
+
+  async linkMember(code: string, senderJid: string, groupId: string): Promise<LinkResponse> {
+    const url = `${this.baseUrl}/api/bot/link`
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { 'Content-Type': 'application/json', 'x-bot-secret': this.secretKey },
+        body: JSON.stringify({ code, senderJid, groupId }),
+      })
+      return await this.readJson<LinkResponse>(res, url)
+    } catch (err) {
+      console.error('[ApiClient] Error linking member:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' }
+    }
+  }
+
+  async getMember(voterJid: string, groupId: string): Promise<MemberResponse> {
+    const params = new URLSearchParams({ voterJid, groupId })
+    const url = `${this.baseUrl}/api/bot/member?${params}`
+    try {
+      const res = await fetch(url, {
+        redirect: 'manual',
+        headers: { 'x-bot-secret': this.secretKey },
+      })
+      return await this.readJson<MemberResponse>(res, url)
+    } catch (err) {
+      console.error('[ApiClient] Error looking up member:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' }
     }
   }
 
@@ -93,18 +133,12 @@ export class ApiClient {
     const url = `${this.baseUrl}/api/bot/vote?${params.toString()}`
     try {
       const res = await fetch(url, {
+        redirect: 'manual',
         headers: {
           'x-bot-secret': this.secretKey,
         },
       })
-      const data = await res.json()
-      if (!res.ok) {
-        return {
-          success: false,
-          error: data.error || `HTTP error ${res.status}`,
-        }
-      }
-      return data
+      return await this.readJson<SummaryResponse>(res, url)
     } catch (err) {
       console.error('[ApiClient] Error getting summary from website:', err)
       return {

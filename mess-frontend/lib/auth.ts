@@ -12,7 +12,11 @@ export type MessSession = {
 
 export const SESSION_COOKIE = 'messflow_session'
 
-const JWT_SECRET = process.env.MESSFLOW_JWT_SECRET ?? 'development-messflow-secret'
+const JWT_SECRET = (() => {
+  const value = process.env.MESSFLOW_JWT_SECRET
+  if (!value) throw new Error('MESSFLOW_JWT_SECRET is required')
+  return value
+})()
 
 function isPayload(value: unknown): value is MessSession {
   return Boolean(value && typeof value === 'object' && 'messId' in value)

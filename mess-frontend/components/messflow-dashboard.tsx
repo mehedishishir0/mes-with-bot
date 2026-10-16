@@ -37,7 +37,7 @@ import {
   X,
 } from "lucide-react";
 
-type Member = { id: string; name: string; initials: string; color: string; houseRent: number; phone?: string | null };
+type Member = { id: string; name: string; initials: string; color: string; houseRent: number; phone?: string | null; whatsappLid?: string | null };
 type MealDay = {
   date: string;
   label: string;
@@ -45,10 +45,9 @@ type MealDay = {
   lunchCounts: Record<string, number>;
   dinnerCounts: Record<string, number>;
   unassignedCounts: Record<string, number>;
-  sources: Record<string, 'manual' | 'planned' | 'automatic'>;
+  sources: Record<string, 'manual' | 'automatic'>;
   total: number;
 };
-type MealSchedule = { id: string; memberId: string; startDate: string; endDate: string; count: number; lunchCount?: number | null; dinnerCount?: number | null };
 type TodayOverview =
   | { date: string; dutyNames: string[]; lunch: number; dinner: number; total: number; unassigned: number }
   | { date: string; error: true };
@@ -620,17 +619,10 @@ function MealRateBudgetOptimizer({
 export default function MessFlowDashboard({ defaultTab }: { defaultTab?: string } = {}) {
   const router = useRouter()
   const [members, setMembers] = useState<Member[]>([]);
+  const [memberLinkCodes, setMemberLinkCodes] = useState<Record<string, string>>({});
+  const [memberLinkError, setMemberLinkError] = useState<Record<string, string>>({});
+  const [memberLinkBusy, setMemberLinkBusy] = useState<string | null>(null);
   const [days, setDays] = useState<MealDay[]>([]);
-  const [mealSchedules, setMealSchedules] = useState<MealSchedule[]>([]);
-  const [isMealScheduleOpen, setIsMealScheduleOpen] = useState(false);
-  const [editingMealScheduleId, setEditingMealScheduleId] = useState<string | null>(null);
-  const [scheduleMemberId, setScheduleMemberId] = useState('');
-  const [scheduleStartDate, setScheduleStartDate] = useState('');
-  const [scheduleEndDate, setScheduleEndDate] = useState('');
-  const [scheduleLunchCount, setScheduleLunchCount] = useState('1');
-  const [scheduleDinnerCount, setScheduleDinnerCount] = useState('1');
-  const [scheduleError, setScheduleError] = useState('');
-  const [scheduleSaving, setScheduleSaving] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
     let lastDate = getDhakaToday();
@@ -736,21 +728,18 @@ export default function MessFlowDashboard({ defaultTab }: { defaultTab?: string 
               initials: member.initials,
               color: member.color,
               phone: member.phone ?? '',
+              whatsappLid: member.whatsappLid ?? '',
               houseRent: hr !== undefined ? (Number(hr.amount) || 0) : (Number(member.houseRent) || 0),
             };
           },
         );
         setMembers(nextMembers);
-        setMealSchedules((data.mealSchedules || []).map((schedule: MealSchedule) => ({
-          ...schedule,
-          memberId: data.members.find((member: { id: string; externalId: string }) => member.id === schedule.memberId)?.externalId ?? schedule.memberId,
-        })));
         setDays(
           data.days.map(
             (day: {
               date: string;
               label: string;
-              entries: { memberId: string; count: number; lunchCount: number; dinnerCount: number; unassignedCount: number; source: 'manual' | 'planned' | 'automatic' }[];
+              entries: { memberId: string; count: number; lunchCount: number; dinnerCount: number; unassignedCount: number; source: 'manual' | 'automatic' }[];
             }) => ({
               date: day.date,
               label: day.label,
@@ -1084,69 +1073,6 @@ export default function MessFlowDashboard({ defaultTab }: { defaultTab?: string 
     });
   }
 
-  function openMealSchedule(schedule?: MealSchedule) {
-    setEditingMealScheduleId(schedule?.id ?? null);
-    setScheduleMemberId(schedule?.memberId ?? members[0]?.id ?? '');
-    const today = getDhakaToday();
-    const defaultDate = selectedMonth === today.slice(0, 7) ? today : `${selectedMonth}-01`;
-    setScheduleStartDate(schedule?.startDate ?? defaultDate);
-    setScheduleEndDate(schedule?.endDate ?? defaultDate);
-    setScheduleLunchCount(schedule ? String(schedule.lunchCount ?? (schedule.count === 2 ? 1 : schedule.count === 0 ? 0 : '')) : '1');
-    setScheduleDinnerCount(schedule ? String(schedule.dinnerCount ?? (schedule.count === 2 ? 1 : schedule.count === 0 ? 0 : '')) : '1');
-    setScheduleError('');
-    setIsMealScheduleOpen(true);
-  }
-
-  async function submitMealSchedule(event: React.FormEvent) {
-    event.preventDefault();
-    const lunchCount = Number(scheduleLunchCount);
-    const dinnerCount = Number(scheduleDinnerCount);
-    if (!scheduleMemberId || scheduleStartDate > scheduleEndDate) {
-      setScheduleError('সঠিক সদস্য ও তারিখ নির্বাচন করুন।');
-      return;
-    }
-    if (scheduleLunchCount === '' || scheduleDinnerCount === '' || !Number.isSafeInteger(lunchCount) || !Number.isSafeInteger(dinnerCount) || lunchCount < 0 || dinnerCount < 0 || !Number.isSafeInteger(lunchCount + dinnerCount)) {
-      setScheduleError('দুপুর ও রাতের জন্য শূন্য বা তার বেশি পূর্ণসংখ্যা লিখুন।');
-      return;
-    }
-    setScheduleSaving(true);
-    setScheduleError('');
-    try {
-      const response = await fetch(`/api/messflow?month=${selectedMonth}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'mealSchedule', id: editingMealScheduleId ?? undefined, memberId: scheduleMemberId, startDate: scheduleStartDate, endDate: scheduleEndDate, lunchCount, dinnerCount }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'পরিকল্পনা সংরক্ষণ করা যায়নি।');
-      setIsMealScheduleOpen(false);
-      if (selectedMonth === scheduleStartDate.slice(0, 7)) {
-        setReloadKey((key) => key + 1);
-      } else {
-        setSelectedMonth(scheduleStartDate.slice(0, 7));
-      }
-    } catch (error) {
-      setScheduleError(error instanceof Error ? error.message : 'পরিকল্পনা সংরক্ষণ করা যায়নি।');
-    } finally {
-      setScheduleSaving(false);
-    }
-  }
-
-  async function removeMealSchedule(schedule: MealSchedule) {
-    if (!window.confirm('এই মিল পরিকল্পনাটি বাতিল করবেন?')) return;
-    try {
-      const response = await fetch(`/api/messflow?month=${selectedMonth}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'mealScheduleRemove', id: schedule.id }),
-      });
-      if (!response.ok) throw new Error('পরিকল্পনা বাতিল করা যায়নি।');
-      setReloadKey((key) => key + 1);
-    } catch (error) {
-      setScheduleError(error instanceof Error ? error.message : 'পরিকল্পনা বাতিল করা যায়নি।');
-    }
-  }
-
   function addMember() {
     setIsAddMemberOpen(true);
   }
@@ -1241,6 +1167,25 @@ export default function MessFlowDashboard({ defaultTab }: { defaultTab?: string 
       ),
     );
     void persist({ action: "memberUpdate", memberId: id, phone: normalized });
+  }
+
+  async function generateMemberLinkCode(memberId: string, phone: string) {
+    setMemberLinkBusy(memberId);
+    setMemberLinkError((current) => ({ ...current, [memberId]: '' }));
+    try {
+      const response = await fetch('/api/mess/member-link-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ memberId, phone }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'কোড তৈরি করা যায়নি।');
+      setMemberLinkCodes((current) => ({ ...current, [memberId]: result.code }));
+    } catch (error) {
+      setMemberLinkError((current) => ({ ...current, [memberId]: error instanceof Error ? error.message : 'কোড তৈরি করা যায়নি।' }));
+    } finally {
+      setMemberLinkBusy(null);
+    }
   }
 
   function updateExpense(memberId: string, category: string, amount: number) {
@@ -2068,33 +2013,6 @@ export default function MessFlowDashboard({ defaultTab }: { defaultTab?: string 
                   </div>
                 }
               />
-              <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h3 className="font-semibold">আগাম মিল পরিকল্পনা</h3>
-                    <p className="text-xs text-muted-foreground">স্বয়ংক্রিয়ভাবে প্রতিদিন দুপুরে ১টি এবং রাতে ১টি মিল। পরিকল্পনায় দুই বেলাই ০ রাখলে মিল বন্ধ।</p>
-                  </div>
-                  <button type="button" onClick={() => openMealSchedule()} disabled={members.length === 0} className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
-                    <Plus size={16} /> পরিকল্পনা যোগ করুন
-                  </button>
-                </div>
-                {scheduleError && <p role="alert" className="text-sm text-destructive">{scheduleError}</p>}
-                {mealSchedules.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {mealSchedules.map((schedule) => (
-                      <div key={schedule.id} className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs">
-                        <span className="font-semibold">{members.find((member) => member.id === schedule.memberId)?.name ?? 'মেম্বার'}</span>
-                        <span>{schedule.startDate} → {schedule.endDate}</span>
-                        <span className="font-bold text-primary">দুপুর {schedule.lunchCount ?? (schedule.count === 2 ? 1 : schedule.count === 0 ? 0 : '?')} · রাত {schedule.dinnerCount ?? (schedule.count === 2 ? 1 : schedule.count === 0 ? 0 : '?')}</span>
-                        {schedule.count === 0 && <span className="rounded-full bg-muted px-2 py-0.5 font-semibold text-muted-foreground">দুই বেলা বন্ধ</span>}
-                        {schedule.lunchCount == null && schedule.dinnerCount == null && schedule.count !== 0 && schedule.count !== 2 && <span className="text-amber-700 dark:text-amber-300">পুরোনো {schedule.count} মিলের বেলা নির্ধারণ বাকি</span>}
-                        <button type="button" onClick={() => openMealSchedule(schedule)} className="font-semibold text-primary hover:underline">এডিট</button>
-                        <button type="button" onClick={() => void removeMealSchedule(schedule)} aria-label="পরিকল্পনা বাতিল" className="text-destructive hover:opacity-70"><Trash2 size={14} /></button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
               <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
                   <span>দুপুর ও রাতের সংখ্যা লিখুন। ঘর থেকে বের হলে পরিবর্তন সংরক্ষিত হবে।</span>
@@ -2885,6 +2803,7 @@ export default function MessFlowDashboard({ defaultTab }: { defaultTab?: string 
                     </button>
                   }
                 />
+                <p className="mt-3 text-sm text-muted-foreground">মেম্বারের WhatsApp নম্বর লিখুন। তারপর লিংক কোড তৈরি করে তাঁকে দিন। গ্রুপে <code>!link</code> লিখে পাশে দেখানো আসল ১৬ অক্ষরের কোড পাঠাতে হবে; <code>CODE</code> শব্দটি লিখবেন না। এরপর তাঁর পোল ভোট নিজের নামে জমা হবে।</p>
                 <div className="mt-4 overflow-hidden rounded-2xl border border-border bg-card">
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm sm:min-w-[680px]">
@@ -2892,6 +2811,7 @@ export default function MessFlowDashboard({ defaultTab }: { defaultTab?: string 
                         <tr>
                           <th className="px-4 py-3 font-medium">মেম্বার</th>
                           <th className="px-4 py-3 font-medium">WhatsApp ফোন</th>
+                          <th className="px-4 py-3 font-medium">WhatsApp সংযোগ</th>
                           <th className="px-4 py-3 text-right font-medium">মোট মিল</th>
                           <th className="px-4 py-3 text-right font-medium">ডিফল্ট ইউটিলিটি</th>
                           <th className="px-4 py-3 text-right font-medium">কাস্টম ইউটিলিটি শেয়ার</th>
@@ -2917,6 +2837,30 @@ export default function MessFlowDashboard({ defaultTab }: { defaultTab?: string 
                                 onChange={(event) => updateMemberPhone(row.id, event.target.value)}
                                 className="w-36 rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
                               />
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="min-w-44 space-y-1">
+                                <span className={row.whatsappLid ? 'text-emerald-600 font-semibold' : 'text-muted-foreground'}>
+                                  {row.whatsappLid ? '✅ যুক্ত আছে' : 'এখনো যুক্ত হয়নি'}
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={memberLinkBusy === row.id}
+                                  onClick={() => void generateMemberLinkCode(row.id, row.phone ?? '')}
+                                  className="block text-xs font-semibold text-primary hover:underline disabled:opacity-50"
+                                >
+                                  {row.whatsappLid ? 'নতুন কোড দিয়ে পুনরায় যুক্ত করুন' : 'লিংক কোড তৈরি করুন'}
+                                </button>
+                                <button type="button" onClick={() => setReloadKey((key) => key + 1)} className="block text-xs text-muted-foreground hover:underline">সংযোগের অবস্থা দেখুন</button>
+                                {memberLinkCodes[row.id] && (
+                                  <div className="rounded-lg border border-primary/30 bg-primary/5 p-2 text-xs">
+                                    <p>এই মেম্বারকে গ্রুপে লিখতে বলুন:</p>
+                                    <code className="select-all font-bold text-foreground">!link {memberLinkCodes[row.id]}</code>
+                                    <p className="mt-1 text-muted-foreground">কোড ২৪ ঘণ্টা পর্যন্ত একবার ব্যবহার করা যাবে।</p>
+                                  </div>
+                                )}
+                                {memberLinkError[row.id] && <p className="text-xs text-destructive">{memberLinkError[row.id]}</p>}
+                              </div>
                             </td>
                             <td className="px-4 py-3 text-right">{row.meals}</td>
                             <td className="px-4 py-3 text-right text-muted-foreground">{money(calculated.defaultUtilityShare)}</td>
@@ -3204,48 +3148,6 @@ export default function MessFlowDashboard({ defaultTab }: { defaultTab?: string 
         </div>
       )}
 
-      {isMealScheduleOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-          <div role="dialog" aria-modal="true" aria-labelledby="meal-schedule-title" className="w-full max-w-md space-y-4 rounded-3xl border border-border bg-card p-6 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <h3 id="meal-schedule-title" className="text-lg font-bold">{editingMealScheduleId ? 'মিল পরিকল্পনা এডিট' : 'আগাম মিল পরিকল্পনা'}</h3>
-              <button type="button" onClick={() => setIsMealScheduleOpen(false)} aria-label="বন্ধ করুন" className="rounded-full p-1 hover:bg-accent"><X size={18} /></button>
-            </div>
-            <form onSubmit={submitMealSchedule} className="space-y-4">
-              <label className="block space-y-1 text-sm font-medium">সদস্য
-                <select value={scheduleMemberId} onChange={(event) => setScheduleMemberId(event.target.value)} required className="w-full rounded-lg border border-input bg-background px-3 py-2">
-                  {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
-                </select>
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block space-y-1 text-sm font-medium">শুরুর তারিখ
-                  <input type="date" required value={scheduleStartDate} onChange={(event) => setScheduleStartDate(event.target.value)} className="w-full rounded-lg border border-input bg-background px-3 py-2" />
-                </label>
-                <label className="block space-y-1 text-sm font-medium">শেষ তারিখ
-                  <input type="date" required min={scheduleStartDate} value={scheduleEndDate} onChange={(event) => setScheduleEndDate(event.target.value)} className="w-full rounded-lg border border-input bg-background px-3 py-2" />
-                </label>
-              </div>
-              {editingMealScheduleId && scheduleLunchCount === '' && scheduleDinnerCount === '' && <p className="rounded-lg bg-orange-500/10 px-3 py-2 text-xs text-orange-700 dark:text-orange-300">পুরোনো পরিকল্পনায় কোন বেলায় মিল ছিল জানা নেই। দুপুর ও রাতের সংখ্যা লিখে পরিকল্পনাটি আপডেট করুন।</p>}
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block space-y-1 text-sm font-medium">দুপুরে প্রতিদিন কত মিল
-                  <input type="number" min="0" step="1" required value={scheduleLunchCount} onChange={(event) => setScheduleLunchCount(event.target.value)} className="w-full rounded-lg border border-input bg-background px-3 py-2 tabular-nums" />
-                </label>
-                <label className="block space-y-1 text-sm font-medium">রাতে প্রতিদিন কত মিল
-                  <input type="number" min="0" step="1" required value={scheduleDinnerCount} onChange={(event) => setScheduleDinnerCount(event.target.value)} className="w-full rounded-lg border border-input bg-background px-3 py-2 tabular-nums" />
-                </label>
-              </div>
-              {scheduleLunchCount !== '' && scheduleDinnerCount !== '' && <p className="rounded-lg bg-primary/10 px-3 py-2 text-sm font-semibold text-primary">প্রতিদিন মোট {Number(scheduleLunchCount) + Number(scheduleDinnerCount)} মিল{Number(scheduleLunchCount) + Number(scheduleDinnerCount) === 0 ? ' — দুই বেলাই বন্ধ' : ''}</p>}
-              <p className="text-xs text-muted-foreground">আগে হাতে বদলানো দিনের মিল একই থাকবে। পরিকল্পনার পরে কোনো ঘর হাতে বদলালে সেই দিনের জন্য নতুন সংখ্যাটি কার্যকর হবে।</p>
-              {scheduleError && <p role="alert" className="text-sm text-destructive">{scheduleError}</p>}
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => setIsMealScheduleOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm">বাতিল</button>
-                <button type="submit" disabled={scheduleSaving} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">{scheduleSaving ? 'সংরক্ষণ হচ্ছে…' : 'সংরক্ষণ করুন'}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* Market Duty Selection Modal */}
       {isMarketDutyModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4 animate-in fade-in">
@@ -3445,12 +3347,12 @@ function MealCountEditor({
   date: string;
   lunch: number;
   dinner: number;
-  source: 'manual' | 'planned' | 'automatic';
+  source: 'manual' | 'automatic';
   onLunchChange: (value: string) => void;
   onDinnerChange: (value: string) => void;
   onBlur: () => void;
 }) {
-  const sourceTitle = source === 'planned' ? 'আগাম পরিকল্পনা' : source === 'manual' ? 'হাতে দেওয়া মিল' : 'স্বয়ংক্রিয় মিল';
+  const sourceTitle = source === 'manual' ? 'সংরক্ষিত মিল' : 'ভোট নেই (০ মিল)';
   const inputClass = 'w-12 rounded-md border border-border bg-background px-1 py-1 text-center text-sm font-bold tabular-nums text-foreground outline-none focus:ring-2 focus:ring-primary/40 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
 
   return (

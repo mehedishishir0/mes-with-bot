@@ -6,7 +6,8 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "reset": "tsx src/reset.ts"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.12",

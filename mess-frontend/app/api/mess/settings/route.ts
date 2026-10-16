@@ -7,6 +7,7 @@ import { getSessionFromRequest } from '@/lib/auth'
 const settingsSchema = z.object({
   messName: z.string().trim().min(2).max(80).optional(),
   managerName: z.string().trim().min(2).max(80).optional(),
+  whatsappGroupId: z.string().trim().regex(/^\d+@g\.us$/, 'Invalid WhatsApp group ID').nullable().optional(),
   currentPassword: z.string().min(6).max(120).optional(),
   newPassword: z.string().min(6).max(120).optional(),
 })
@@ -24,6 +25,7 @@ export async function GET(request: Request) {
       id: true,
       messName: true,
       managerName: true,
+      whatsappGroupId: true,
       email: true,
       createdAt: true,
       updatedAt: true,
@@ -67,7 +69,7 @@ export async function PUT(request: Request) {
       payload.newPassword = payload.newPassword.trim()
     }
 
-    const updatePayload: { messName?: string; managerName?: string; password?: string } = {}
+    const updatePayload: { messName?: string; managerName?: string; whatsappGroupId?: string | null; password?: string } = {}
 
     if (payload.messName) {
       updatePayload.messName = payload.messName
@@ -75,6 +77,10 @@ export async function PUT(request: Request) {
 
     if (payload.managerName) {
       updatePayload.managerName = payload.managerName
+    }
+
+    if (payload.whatsappGroupId !== undefined) {
+      updatePayload.whatsappGroupId = payload.whatsappGroupId
     }
 
     if (payload.newPassword) {
@@ -88,6 +94,7 @@ export async function PUT(request: Request) {
         id: true,
         messName: true,
         managerName: true,
+        whatsappGroupId: true,
         email: true,
       },
     })

@@ -12,13 +12,14 @@ import fs from 'fs'
 import http from 'http'
 import path from 'path'
 import pino from 'pino'
+import readline from 'readline'
 import QRCode from 'qrcode'
 import qrcodeTerminal from 'qrcode-terminal'
 import NodeCache from 'node-cache'
 import { apiClient } from './apiClient.js'
 import { CONFIG, getDhakaDate, getDhakaHourMinute } from './config.js'
-import { pollManager } from './pollManager.js'
-import { setupScheduler } from './scheduler.js'
+import { pollManager, revivePollBuffer } from './pollManager.js'
+import { pauseScheduler, setupScheduler } from './scheduler.js'
 
 // Handle transient Signal protocol / cipher negotiation warnings without terminating process
 process.on('uncaughtException', (err) => {
@@ -45,6 +46,49 @@ let currentPairingCode: string | null = null
 let isConnected = false
 let botUserJid = ''
 let currentSocket: WASocket | null = null
+let connectionGeneration = 0
+let reconnectTimer: NodeJS.Timeout | null = null
+let resetInProgress = false
+
+// Type "reset" in the running bot terminal to request a new WhatsApp QR code.
+const terminal = readline.createInterface({ input: process.stdin, output: process.stdout })
+console.log('⌨️  WhatsApp নতুন করে লিংক করতে এই টার্মিনালে reset লিখে Enter চাপুন।')
+terminal.on('line', (line) => {
+  if (line.trim().toLowerCase() !== 'reset') return
+  void resetWhatsAppSession()
+})
+
+async function resetWhatsAppSession() {
+  if (resetInProgress) return
+  resetInProgress = true
+  connectionGeneration++ // Ignore events and credential writes from the old socket.
+  if (reconnectTimer) clearTimeout(reconnectTimer)
+  reconnectTimer = null
+  pauseScheduler()
+  const oldSocket = currentSocket
+  currentSocket = null
+  isConnected = false
+  botUserJid = ''
+  latestQrDataUrl = null
+  currentPairingCode = null
+
+  try {
+    try {
+      oldSocket?.end(new Error('Terminal session reset'))
+    } catch (err) {
+      console.warn('[Reset] Could not close old socket cleanly:', err)
+    }
+    fs.rmSync(CONFIG.AUTH_DIR, { recursive: true, force: true })
+    console.log('\n🔄 WhatsApp session reset হয়েছে। নতুন QR তৈরি হচ্ছে...')
+    await startBot()
+    console.log(`📲 QR দেখতে খুলুন: http://localhost:${WEB_PORT}\n`)
+  } catch (err) {
+    console.error('[Reset Error]:', err)
+    console.error('আবার reset লিখে Enter চাপুন।')
+  } finally {
+    resetInProgress = false
+  }
+}
 
 export const messageStore = new Map<string, proto.IMessage>()
 const msgRetryCounterCache = new NodeCache()
@@ -70,7 +114,7 @@ function preloadPollMessages() {
   try {
     const pollFile = path.resolve(process.cwd(), 'active_polls.json')
     if (fs.existsSync(pollFile)) {
-      const data = JSON.parse(fs.readFileSync(pollFile, 'utf-8'))
+      const data = JSON.parse(fs.readFileSync(pollFile, 'utf-8'), revivePollBuffer)
       if (Array.isArray(data)) {
         for (const p of data) {
           if (p.id && p.message) {
@@ -153,11 +197,12 @@ const server = http.createServer((req, res) => {
   `)
 })
 
-server.listen(WEB_PORT, () => {
+server.listen(WEB_PORT, '127.0.0.1', () => {
   console.log(`\n🌐 [QR Web View] ব্রাউজারে স্পষ্ট QR কোড দেখতে ভিজিট করুন: http://localhost:${WEB_PORT}\n`)
 })
 
 async function startBot() {
+  const generation = ++connectionGeneration
   console.log('====================================================')
   console.log('🤖 Starting Mess WhatsApp Meal Management Bot...')
   console.log(`🌐 Website URL: ${CONFIG.WEBSITE_API_URL}`)
@@ -167,6 +212,7 @@ async function startBot() {
   const logger = pino({ level: 'silent' })
   const { state, saveCreds } = await useMultiFileAuthState(CONFIG.AUTH_DIR)
   const { version, isLatest } = await fetchLatestBaileysVersion()
+  if (generation !== connectionGeneration) return
   console.log(`[WhatsApp] Using WA v${version.join('.')}, isLatest: ${isLatest}`)
 
   const sock: WASocket = makeWASocket({
@@ -180,7 +226,31 @@ async function startBot() {
     msgRetryCounterCache,
     syncFullHistory: false,
     browser: Browsers.ubuntu('Chrome'),
-    generateHighQualityLinkPreview: true,
+    generateHighQualityLinkPreview: false, // Reduces IQ queries that cause 406 errors
+    retryRequestDelayMs: 2000,             // Wait 2s between retries to avoid rate limiting
+    maxMsgRetryCount: 5,                   // Allow up to 5 retries on send failures
+    // Wrap interactive messages to bypass Signal session assertion on some WA server versions
+    patchMessageBeforeSending: (msg) => {
+      const requiresPatch = !!(
+        (msg as any).buttonsMessage ||
+        (msg as any).templateMessage ||
+        (msg as any).listMessage
+      )
+      if (requiresPatch) {
+        msg = {
+          viewOnceMessage: {
+            message: {
+              messageContextInfo: {
+                deviceListMetadataVersion: 2,
+                deviceListMetadata: {},
+              },
+              ...msg,
+            },
+          },
+        } as any
+      }
+      return msg
+    },
     getMessage: async (key) => {
       const id = key.id
       const fullId = `${key.remoteJid}:${key.id}`
@@ -211,7 +281,9 @@ async function startBot() {
   }) as any
 
   currentSocket = sock
-  sock.ev.on('creds.update', saveCreds)
+  sock.ev.on('creds.update', () => {
+    if (generation === connectionGeneration) void saveCreds()
+  })
 
   const isAlreadyLoggedIn = Boolean(sock.authState.creds.registered || sock.authState.creds.me?.id)
   if (isAlreadyLoggedIn) {
@@ -231,8 +303,10 @@ async function startBot() {
     console.log(`[WhatsApp] Pairing with number: +${cleanNumber}`)
 
     setTimeout(async () => {
+      if (generation !== connectionGeneration) return
       try {
         const code = await sock.requestPairingCode(cleanNumber)
+        if (generation !== connectionGeneration) return
         currentPairingCode = code?.match(/.{1,4}/g)?.join('-') || code
         console.log(`\n====================================================`)
         console.log(`📱 মোবাইল নাম্বার: +${cleanNumber}`)
@@ -247,6 +321,7 @@ async function startBot() {
 
   // Connection events
   sock.ev.on('connection.update', async (update) => {
+    if (generation !== connectionGeneration) return
     const { connection, lastDisconnect, qr } = update
 
     if (qr && !isAlreadyLoggedIn) {
@@ -264,6 +339,7 @@ async function startBot() {
 
     if (connection === 'close') {
       isConnected = false
+      pauseScheduler()
       const statusCode = (lastDisconnect?.error as any)?.output?.statusCode
       const isLoggedOut = statusCode === DisconnectReason.loggedOut
 
@@ -281,7 +357,12 @@ async function startBot() {
       }
 
       console.log('[WhatsApp] Reconnecting in 3 seconds...')
-      setTimeout(startBot, 3000)
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        if (generation === connectionGeneration) {
+          void startBot().catch((err) => console.error('[Reconnect Error]:', err))
+        }
+      }, 3000)
     } else if (connection === 'open') {
       isConnected = true
       botUserJid = sock.user?.id || ''
@@ -324,7 +405,38 @@ async function startBot() {
           console.log(`\n👉 Automatically targeting first group: "${groupList[0].subject}" (${activeGroupJid})`)
         }
 
+        // Fetch participants and allow initial connection events to settle.
+        // Presence subscriptions do not verify Signal send sessions.
+        if (activeGroupJid) {
+          console.log('\n⏳ Warming up Signal sessions with group participants...')
+          try {
+            const groupMeta = await sock.groupMetadata(activeGroupJid)
+            const participants = groupMeta.participants.map((p) => p.id)
+            console.log(`   Found ${participants.length} participant(s) in group`)
+
+            // Subscribe to presence: this establishes Signal sessions
+            for (const jid of participants) {
+              try {
+                await sock.presenceSubscribe(jid)
+              } catch {
+                // Ignore individual failures
+              }
+            }
+            // Give sessions time to be negotiated
+            await new Promise((r) => setTimeout(r, 3000))
+            console.log('✅ Connection warmup complete. Test a command to confirm message sending.')
+          } catch (warmupErr) {
+            console.warn('[Warmup] Could not fetch group metadata:', warmupErr)
+            await new Promise((r) => setTimeout(r, 3000))
+            console.log('✅ Connection warmup complete (basic).')
+          }
+        } else {
+          await new Promise((r) => setTimeout(r, 3000))
+          console.log('✅ Connection warmup complete. Test a command to confirm message sending.')
+        }
+
         // Start background scheduler
+        if (generation !== connectionGeneration) return
         setupScheduler(sock, () => activeGroupJid)
       } catch (err) {
         console.error('[WhatsApp] Error fetching groups:', err)
@@ -332,11 +444,31 @@ async function startBot() {
     }
   })
 
-  // Listen for messages (commands and poll updates)
-  sock.ev.on('messages.upsert', async ({ messages }) => {
+  // Baileys emits decrypted poll selections here, after processing messages.upsert.
+  sock.ev.on('messages.update', async (updates) => {
+    if (generation !== connectionGeneration) return
+    for (const { key, update } of updates) {
+      if (!key.id || !update.pollUpdates?.length) continue
+      for (const pollUpdate of update.pollUpdates) {
+        await pollManager.handlePollUpdate(sock, key.id, pollUpdate)
+      }
+    }
+  })
+
+  // Listen for incoming text commands and save messages for poll decryption.
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (generation !== connectionGeneration) return
+    // 'notify' = new incoming messages; 'append' = history sync — we only care about new messages
+    console.log(`[Event] messages.upsert type="${type}" count=${messages.length}`)
+
     for (const msg of messages) {
       const remoteJid = msg.key.remoteJid
       if (!remoteJid) continue
+
+      // Debug: log every received message (helps diagnose receive issues)
+      const msgType = Object.keys(msg.message || {}).join(', ') || 'null/empty'
+      const fromMe = msg.key.fromMe ? '(fromMe)' : ''
+      console.log(`[MSG] jid=${remoteJid} type=${msgType} ${fromMe}`)
 
       // Save to store for cipher/retry
       if (msg.message && msg.key.id) {
@@ -344,35 +476,68 @@ async function startBot() {
         messageStore.set(`${remoteJid}:${msg.key.id}`, msg.message)
       }
 
-      // 1. Handle Poll Vote Updates
-      const pollUpdate = msg.message?.pollUpdateMessage
-      if (pollUpdate) {
-        const sender = msg.key.participant || msg.participant || remoteJid
-        try {
-          await pollManager.handlePollUpdate(sock, pollUpdate, sender)
-        } catch (err) {
-          console.error('[Poll Error]:', err)
-        }
-        continue
-      }
+      // Skip stub/empty messages (no real content)
+      if (!msg.message) continue
 
-      // 2. Handle Text Commands (for testing and manual control)
+      // Handle text commands (for testing and manual control)
       const text =
         msg.message?.conversation ||
         msg.message?.extendedTextMessage?.text ||
         ''
 
-      if (!text.startsWith('!')) continue
+      if (!text.startsWith('!') || msg.key.fromMe || type !== 'notify') continue
 
-      console.log(`[WhatsApp Message Received in ${remoteJid}]: "${text}"`)
+      const isLinkCommand = /^!\s*link(?:\s+|$)/i.test(text.trim())
+      console.log(`[CMD] Received in ${remoteJid}: "${isLinkCommand ? '!link [hidden]' : text}"`)
 
       const cmd = text.trim().toLowerCase().replace(/\s+/g, '-')
 
+      // Helper: retry sendMessage up to 3 times on transient 'not-acceptable' errors
+      const safeSend = async (jid: string, content: any, retries = 3): Promise<any> => {
+        for (let attempt = 1; attempt <= retries; attempt++) {
+          try {
+            return await sock.sendMessage(jid, content)
+          } catch (err: any) {
+            const isRetryable =
+              err?.message === 'not-acceptable' ||
+              err?.data === 406 ||
+              err?.output?.statusCode === 500
+            if (isRetryable && attempt < retries) {
+              console.warn(`[Bot] sendMessage attempt ${attempt} failed (${err.message}), retrying in 2s...`)
+              await new Promise((r) => setTimeout(r, 2000))
+            } else {
+              throw err
+            }
+          }
+        }
+      }
+
       try {
-        if (cmd === '!status' || cmd === '!ping') {
+        if (isLinkCommand) {
+          if (!activeGroupJid || remoteJid !== activeGroupJid) {
+            await safeSend(remoteJid, { text: '❌ এই মেসের WhatsApp গ্রুপে !link CODE পাঠান।' })
+            continue
+          }
+          const senderJid = msg.key.participant
+          const code = text.trim().match(/^!\s*link\s+([a-f0-9]{16})\s*$/i)?.[1]
+          if (!code) {
+            await safeSend(remoteJid, { text: '❌ CODE শব্দটি উদাহরণ। ওয়েবসাইটের মেম্বারবৃন্দ পেজে “লিংক কোড তৈরি করুন” চাপুন, তারপর সেখানে দেখানো ১৬ অক্ষরের আসল কোড কপি করে !link-এর পরে লিখুন।' })
+            continue
+          }
+          if (!senderJid?.endsWith('@lid')) {
+            await safeSend(remoteJid, { text: '❌ এই WhatsApp মেসেজ থেকে পরিচয় শনাক্ত করা যায়নি। গ্রুপে নিজের অ্যাকাউন্ট থেকে আবার চেষ্টা করুন।' })
+            continue
+          }
+          const result = await apiClient.linkMember(code, senderJid, remoteJid)
+          await safeSend(remoteJid, {
+            text: result.success
+              ? `✅ ${result.memberName} এর WhatsApp অ্যাকাউন্ট যুক্ত হয়েছে। এখন পোল ভোট দিলে ওয়েবসাইটে আপডেট হবে।`
+              : `❌ ${result.error || 'অ্যাকাউন্ট যুক্ত করা যায়নি।'}`,
+          })
+        } else if (cmd === '!status' || cmd === '!ping') {
           const { hour, minute } = getDhakaHourMinute()
           const today = getDhakaDate()
-          await sock.sendMessage(remoteJid, {
+          await safeSend(remoteJid, {
             text: `🤖 *Mess Bot Status:*\n✅ Status: Active & Connected\n📅 Date: ${today}\n⏰ Current Dhaka Time: ${hour}:${minute < 10 ? '0' + minute : minute}\n👥 Group: ${remoteJid}`,
           })
           console.log(`[Bot] Replied to !status in ${remoteJid}`)
@@ -383,7 +548,7 @@ async function startBot() {
           cmd === '!polllunch' ||
           cmd === '!poollunch'
         ) {
-          await sock.sendMessage(remoteJid, { text: '🚀 Sending test lunch poll...' })
+          await safeSend(remoteJid, { text: '🚀 Sending test lunch poll...' })
           await pollManager.sendLunchPoll(sock, remoteJid)
           console.log(`[Bot] Sent lunch poll to ${remoteJid}`)
         } else if (
@@ -393,7 +558,7 @@ async function startBot() {
           cmd === '!polldinner' ||
           cmd === '!pooldinner'
         ) {
-          await sock.sendMessage(remoteJid, { text: '🚀 Sending test dinner poll...' })
+          await safeSend(remoteJid, { text: '🚀 Sending test dinner poll...' })
           await pollManager.sendDinnerPoll(sock, remoteJid)
           console.log(`[Bot] Sent dinner poll to ${remoteJid}`)
         } else if (cmd === '!lock-lunch' || cmd === '!locklunch') {
@@ -409,15 +574,15 @@ async function startBot() {
               ?.map((m) => `• ${m.name}: লাঞ্চ ${m.lunch}, ডিনার ${m.dinner}`)
               ?.join('\n') || '(কোনো মিল এন্ট্রি পাওয়া যায়নি)'
 
-            await sock.sendMessage(remoteJid, {
+            await safeSend(remoteJid, {
               text: `📊 *আজকের মিল সামারি (${today}):*\n🍛 মোট লাঞ্চ: ${res.summary.totalLunch} টি\n🌙 মোট ডিনার: ${res.summary.totalDinner} টি\n\n*সদস্যদের মিল:*\n${list}`,
             })
           } else {
-            await sock.sendMessage(remoteJid, { text: `❌ সামারি পাওয়া যায়নি: ${res.error}` })
+            await safeSend(remoteJid, { text: `❌ সামারি পাওয়া যায়নি: ${res.error}` })
           }
         } else if (cmd === '!help') {
-          await sock.sendMessage(remoteJid, {
-            text: `📋 *বট কমান্ড লিস্ট:*\n• \`!status\` - বটের অবস্থা দেখুন\n• \`!poll-lunch\` বা \`!lunch\` - দুপুরের পোল পাঠান\n• \`!poll-dinner\` বা \`!dinner\` - রাতের পোল পাঠান\n• \`!lock-lunch\` - দুপুরের পোল লক করুন\n• \`!lock-dinner\` - রাতের পোল লক করুন\n• \`!summary\` - আজকের মিলের সামারি দেখুন`,
+          await safeSend(remoteJid, {
+            text: `📋 *বট কমান্ড লিস্ট:*\n• \`!link CODE\` - ওয়েবসাইটের কোড দিয়ে অ্যাকাউন্ট যুক্ত করুন\n• \`!status\` - বটের অবস্থা দেখুন\n• \`!poll-lunch\` বা \`!lunch\` - দুপুরের পোল পাঠান\n• \`!poll-dinner\` বা \`!dinner\` - রাতের পোল পাঠান\n• \`!lock-lunch\` - দুপুরের পোল লক করুন\n• \`!lock-dinner\` - রাতের পোল লক করুন\n• \`!summary\` - আজকের মিলের সামারি দেখুন`,
           })
         }
       } catch (cmdErr) {
