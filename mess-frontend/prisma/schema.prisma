@@ -1,0 +1,168 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "windows", "debian-openssl-3.0.x", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("MONGODB_URI")
+}
+
+model Mess {
+  id          String      @id @default(auto()) @map("_id") @db.ObjectId
+  messName    String      @unique
+  managerName String
+  email       String      @unique
+  password    String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  autoMealStartDate String?
+  whatsappGroupId   String?
+  members     Member[]
+  days        MealDay[]
+  expenses    Expense[]
+  utilities   Utility[]
+  overrides   Override[]
+  houseRents  HouseRent[]
+  actualGroceries ActualGrocery[]
+  marketDuties MarketDuty[]
+  mealSchedules MealSchedule[]
+}
+
+model Member {
+  id          String       @id @default(auto()) @map("_id") @db.ObjectId
+  messId      String       @db.ObjectId
+  externalId  String
+  name        String
+  initials    String
+  color       String
+  phone       String?
+  houseRent   Float        @default(0)
+  autoMealStartDate String?
+  mess        Mess         @relation(fields: [messId], references: [id], onDelete: Cascade)
+  meals       MealEntry[]
+  expenses    Expense[]
+  overrides   Override[]
+  houseRents  HouseRent[]
+  marketDuties MarketDuty[]
+  mealSchedules MealSchedule[]
+  @@unique([messId, externalId])
+  @@index([messId])
+  @@index([phone])
+}
+
+model MealDay {
+  id          String      @id @default(auto()) @map("_id") @db.ObjectId
+  messId      String      @db.ObjectId
+  monthKey    String      @default("2026-08")
+  date        String
+  label       String
+  mess        Mess        @relation(fields: [messId], references: [id], onDelete: Cascade)
+  entries     MealEntry[]
+  @@unique([messId, monthKey, date])
+}
+
+model MealEntry {
+  id       String   @id @default(auto()) @map("_id") @db.ObjectId
+  dayId    String   @db.ObjectId
+  memberId String   @db.ObjectId
+  count    Int
+  lunchCount Int?
+  dinnerCount Int?
+  day      MealDay  @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  member   Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  @@unique([dayId, memberId])
+}
+
+model MealSchedule {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  messId    String   @db.ObjectId
+  memberId  String   @db.ObjectId
+  startDate String
+  endDate   String
+  count     Int
+  lunchCount Int?
+  dinnerCount Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  mess      Mess     @relation(fields: [messId], references: [id], onDelete: Cascade)
+  member    Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([messId, startDate, endDate])
+  @@index([memberId, startDate, endDate])
+}
+
+model Expense {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  messId      String    @db.ObjectId
+  monthKey    String    @default("2026-08")
+  memberId    String    @db.ObjectId
+  category    String
+  amount      Float
+  mess        Mess      @relation(fields: [messId], references: [id], onDelete: Cascade)
+  member      Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  @@unique([messId, monthKey, memberId, category])
+}
+
+model Utility {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  messId      String    @db.ObjectId
+  monthKey    String    @default("2026-08")
+  externalId  String
+  name        String
+  amount      Float
+  mess        Mess      @relation(fields: [messId], references: [id], onDelete: Cascade)
+  @@unique([messId, monthKey, externalId])
+}
+
+model Override {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  messId      String    @db.ObjectId
+  monthKey    String    @default("2026-08")
+  memberId    String    @db.ObjectId
+  utilities   Float?
+  mealRate    Float?
+  mess        Mess      @relation(fields: [messId], references: [id], onDelete: Cascade)
+  member      Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  @@unique([messId, monthKey, memberId])
+}
+
+model HouseRent {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  messId      String    @db.ObjectId
+  memberId    String    @db.ObjectId
+  amount      Float
+  monthKey    String    @default("2026-08")
+  mess        Mess      @relation(fields: [messId], references: [id], onDelete: Cascade)
+  member      Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  @@unique([messId, memberId, monthKey])
+  @@index([messId])
+}
+
+model ActualGrocery {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  messId      String    @db.ObjectId
+  monthKey    String    @default("2026-08")
+  amount      Float?
+  note        String?
+  mess        Mess      @relation(fields: [messId], references: [id], onDelete: Cascade)
+  @@unique([messId, monthKey])
+}
+
+model MarketDuty {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  messId      String   @db.ObjectId
+  monthKey    String   @default("2026-09")
+  memberId    String   @db.ObjectId
+  startDay    Int
+  endDay      Int
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  mess        Mess     @relation(fields: [messId], references: [id], onDelete: Cascade)
+  member      Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([messId, monthKey])
+}
+
+

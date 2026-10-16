@@ -1,0 +1,9 @@
+overrides:
+  hono: 4.12.25
+
+allowBuilds:
+  '@prisma/client': false
+  '@prisma/engines': false
+  esbuild: false
+  prisma: false
+  unrs-resolver: false

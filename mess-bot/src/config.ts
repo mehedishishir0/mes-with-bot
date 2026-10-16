@@ -1,0 +1,38 @@
+import dotenv from 'dotenv'
+import path from 'path'
+
+dotenv.config({ path: path.resolve(process.cwd(), '.env') })
+
+export const CONFIG = {
+  WEBSITE_API_URL: (process.env.WEBSITE_API_URL || 'http://localhost:3000').replace(/\/$/, ''),
+  BOT_SECRET_KEY: process.env.BOT_SECRET_KEY || 'mess_bot_secret_2026',
+  WHATSAPP_GROUP_NAME: process.env.WHATSAPP_GROUP_NAME || '',
+  WHATSAPP_GROUP_ID: process.env.WHATSAPP_GROUP_ID || '',
+  TIMEZONE: process.env.TIMEZONE || 'Asia/Dhaka',
+  AUTH_DIR: path.resolve(process.cwd(), 'auth_info'),
+}
+
+export function getDhakaDate(): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: CONFIG.TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+
+  const value = (type: string) => parts.find((p) => p.type === type)?.value ?? ''
+  return `${value('year')}-${value('month')}-${value('day')}`
+}
+
+export function getDhakaHourMinute(): { hour: number; minute: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: CONFIG.TIMEZONE,
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false,
+  }).formatToParts(new Date())
+
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0)
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0)
+  return { hour, minute }
+}

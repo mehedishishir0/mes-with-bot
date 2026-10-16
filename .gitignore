@@ -1,0 +1,16 @@
+# Local credentials and environment configuration
+.env
+.env.*
+!.env.example
+
+# WhatsApp login keys and locally cached message data
+mess-bot/auth_info/
+mess-bot/baileys_store.json
+mess-bot/active_polls.json
+
+# Generated files
+node_modules/
+.next/
+.vercel/
+*.tsbuildinfo
+*.log
