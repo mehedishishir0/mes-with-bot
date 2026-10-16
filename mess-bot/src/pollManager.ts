@@ -171,7 +171,7 @@ export class PollManager {
     console.log(`[PollManager] Locking ${mealType} poll for ${today}`)
 
     for (const poll of this.activePolls.values()) {
-      if (poll.mealType === mealType && poll.date === today) {
+      if (poll.key.remoteJid === groupJid && poll.mealType === mealType && poll.date === today) {
         poll.isLocked = true
       }
     }

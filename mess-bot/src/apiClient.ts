@@ -10,6 +10,8 @@ export type VotePayload = {
 
 export type LinkResponse = { success: boolean; memberName?: string; error?: string }
 export type MemberResponse = { success: boolean; memberName?: string; error?: string }
+export type GroupConnectResponse = { success: boolean; messName?: string; error?: string }
+export type ConnectedGroupsResponse = { success: boolean; groups?: Array<{ id: string; name?: string | null }>; error?: string }
 
 export type VoteResponse = {
   success: boolean
@@ -105,6 +107,33 @@ export class ApiClient {
       return await this.readJson<LinkResponse>(res, url)
     } catch (err) {
       console.error('[ApiClient] Error linking member:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' }
+    }
+  }
+
+  async connectGroup(code: string, groupId: string, groupName?: string): Promise<GroupConnectResponse> {
+    const url = `${this.baseUrl}/api/bot/group-connect`
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { 'Content-Type': 'application/json', 'x-bot-secret': this.secretKey },
+        body: JSON.stringify({ code, groupId, groupName }),
+      })
+      return await this.readJson<GroupConnectResponse>(res, url)
+    } catch (err) {
+      console.error('[ApiClient] Error connecting group:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' }
+    }
+  }
+
+  async getConnectedGroups(): Promise<ConnectedGroupsResponse> {
+    const url = `${this.baseUrl}/api/bot/groups`
+    try {
+      const res = await fetch(url, { redirect: 'manual', headers: { 'x-bot-secret': this.secretKey } })
+      return await this.readJson<ConnectedGroupsResponse>(res, url)
+    } catch (err) {
+      console.error('[ApiClient] Error loading connected groups:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Network error' }
     }
   }

@@ -10,13 +10,13 @@ const config_js_1 = require("./config.js");
 const pollManager_js_1 = require("./pollManager.js");
 let isSchedulerRunning = false;
 let currentSock = null;
-let currentGetGroupJid = null;
+let currentGetGroupJids = null;
 function pauseScheduler() {
     currentSock = null;
 }
-function setupScheduler(sock, getGroupJid) {
+function setupScheduler(sock, getGroupJids) {
     currentSock = sock;
-    currentGetGroupJid = getGroupJid;
+    currentGetGroupJids = getGroupJids;
     if (isSchedulerRunning) {
         console.log('[Scheduler] Updated active WhatsApp socket for existing cron jobs.');
         return;
@@ -24,61 +24,51 @@ function setupScheduler(sock, getGroupJid) {
     isSchedulerRunning = true;
     const timezone = config_js_1.CONFIG.TIMEZONE;
     console.log(`[Scheduler] Initializing cron scheduler with timezone: ${timezone}`);
-    // 00:10 -> Send Lunch Poll
-    node_cron_1.default.schedule('10 0 * * *', async () => {
+    const runForGroups = async (taskName, action) => {
         const sock = currentSock;
-        const groupJid = currentGetGroupJid?.();
-        if (!sock || !groupJid) {
-            console.warn('[Scheduler] Cannot send Lunch Poll: Socket or Group JID not ready');
+        if (!sock)
+            return;
+        const groupJids = await currentGetGroupJids?.() || [];
+        if (!groupJids.length) {
+            console.warn(`[Scheduler] ${taskName}: no connected mess groups found`);
             return;
         }
+        for (const groupJid of groupJids) {
+            try {
+                await action(sock, groupJid);
+            }
+            catch (error) {
+                console.error(`[Scheduler] ${taskName} failed for ${groupJid}:`, error);
+            }
+        }
+    };
+    // 00:10 -> Send Lunch Poll
+    node_cron_1.default.schedule('10 0 * * *', async () => {
         console.log('[Scheduler] 12:10 AM: Triggering Lunch Poll...');
-        await pollManager_js_1.pollManager.sendLunchPoll(sock, groupJid);
+        await runForGroups('Lunch poll', async (socket, groupJid) => pollManager_js_1.pollManager.sendLunchPoll(socket, groupJid));
     }, { timezone });
     // 09:45 -> Remind members before the lunch cutoff
     node_cron_1.default.schedule('45 9 * * *', async () => {
-        const sock = currentSock;
-        const groupJid = currentGetGroupJid?.();
-        if (!sock || !groupJid)
-            return;
-        await pollManager_js_1.pollManager.sendClosingWarning(sock, groupJid, 'lunch');
+        await runForGroups('Lunch warning', async (socket, groupJid) => pollManager_js_1.pollManager.sendClosingWarning(socket, groupJid, 'lunch'));
     }, { timezone });
     // 2. Morning 10:00 AM -> Lock Lunch Poll & Send Summary
     node_cron_1.default.schedule('0 10 * * *', async () => {
-        const sock = currentSock;
-        const groupJid = currentGetGroupJid?.();
-        if (!sock || !groupJid)
-            return;
         console.log('[Scheduler] 10:00 AM: Locking Lunch Poll...');
-        await pollManager_js_1.pollManager.lockLunchPoll(sock, groupJid);
+        await runForGroups('Lunch lock', async (socket, groupJid) => pollManager_js_1.pollManager.lockLunchPoll(socket, groupJid));
     }, { timezone });
     // 11:00 -> Send Dinner Poll
     node_cron_1.default.schedule('0 11 * * *', async () => {
-        const sock = currentSock;
-        const groupJid = currentGetGroupJid?.();
-        if (!sock || !groupJid) {
-            console.warn('[Scheduler] Cannot send Dinner Poll: Socket or Group JID not ready');
-            return;
-        }
         console.log('[Scheduler] 11:00 AM: Triggering Dinner Poll...');
-        await pollManager_js_1.pollManager.sendDinnerPoll(sock, groupJid);
+        await runForGroups('Dinner poll', async (socket, groupJid) => pollManager_js_1.pollManager.sendDinnerPoll(socket, groupJid));
     }, { timezone });
     // 14:45 -> Remind members before the dinner cutoff
     node_cron_1.default.schedule('45 14 * * *', async () => {
-        const sock = currentSock;
-        const groupJid = currentGetGroupJid?.();
-        if (!sock || !groupJid)
-            return;
-        await pollManager_js_1.pollManager.sendClosingWarning(sock, groupJid, 'dinner');
+        await runForGroups('Dinner warning', async (socket, groupJid) => pollManager_js_1.pollManager.sendClosingWarning(socket, groupJid, 'dinner'));
     }, { timezone });
     // 4. Afternoon 03:00 PM (15:00) -> Lock Dinner Poll & Send Summary
     node_cron_1.default.schedule('0 15 * * *', async () => {
-        const sock = currentSock;
-        const groupJid = currentGetGroupJid?.();
-        if (!sock || !groupJid)
-            return;
         console.log('[Scheduler] 03:00 PM: Locking Dinner Poll...');
-        await pollManager_js_1.pollManager.lockDinnerPoll(sock, groupJid);
+        await runForGroups('Dinner lock', async (socket, groupJid) => pollManager_js_1.pollManager.lockDinnerPoll(socket, groupJid));
     }, { timezone });
     console.log('[Scheduler] All 6 daily routines scheduled successfully:');
     console.log('  • 00:10 (12:10 AM) -> দুপুরের মিলের পোল যাবে');

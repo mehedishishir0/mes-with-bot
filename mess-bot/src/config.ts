@@ -8,8 +8,6 @@ if (!process.env.BOT_SECRET_KEY) throw new Error('BOT_SECRET_KEY is required')
 export const CONFIG = {
   WEBSITE_API_URL: (process.env.WEBSITE_API_URL || 'http://localhost:3000').replace(/\/$/, ''),
   BOT_SECRET_KEY: process.env.BOT_SECRET_KEY || '',
-  WHATSAPP_GROUP_NAME: process.env.WHATSAPP_GROUP_NAME || '',
-  WHATSAPP_GROUP_ID: process.env.WHATSAPP_GROUP_ID || '',
   TIMEZONE: process.env.TIMEZONE || 'Asia/Dhaka',
   AUTH_DIR: path.resolve(process.cwd(), 'auth_info'),
 }

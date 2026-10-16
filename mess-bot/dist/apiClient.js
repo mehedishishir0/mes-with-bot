@@ -57,6 +57,33 @@ class ApiClient {
             return { success: false, error: err instanceof Error ? err.message : 'Network error' };
         }
     }
+    async connectGroup(code, groupId, groupName) {
+        const url = `${this.baseUrl}/api/bot/group-connect`;
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                redirect: 'manual',
+                headers: { 'Content-Type': 'application/json', 'x-bot-secret': this.secretKey },
+                body: JSON.stringify({ code, groupId, groupName }),
+            });
+            return await this.readJson(res, url);
+        }
+        catch (err) {
+            console.error('[ApiClient] Error connecting group:', err);
+            return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+        }
+    }
+    async getConnectedGroups() {
+        const url = `${this.baseUrl}/api/bot/groups`;
+        try {
+            const res = await fetch(url, { redirect: 'manual', headers: { 'x-bot-secret': this.secretKey } });
+            return await this.readJson(res, url);
+        }
+        catch (err) {
+            console.error('[ApiClient] Error loading connected groups:', err);
+            return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+        }
+    }
     async getMember(voterJid, groupId) {
         const params = new URLSearchParams({ voterJid, groupId });
         const url = `${this.baseUrl}/api/bot/member?${params}`;

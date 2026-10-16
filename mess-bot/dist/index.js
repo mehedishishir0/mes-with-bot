@@ -67,7 +67,7 @@ process.on('unhandledRejection', (reason) => {
     }
     console.error('[Unhandled Rejection]:', reason);
 });
-let activeGroupJid = config_js_1.CONFIG.WHATSAPP_GROUP_ID || null;
+let connectedGroupIds = new Set();
 let latestQrDataUrl = null;
 let currentPairingCode = null;
 let isConnected = false;
@@ -76,6 +76,15 @@ let currentSocket = null;
 let connectionGeneration = 0;
 let reconnectTimer = null;
 let resetInProgress = false;
+async function refreshConnectedGroups() {
+    const result = await apiClient_js_1.apiClient.getConnectedGroups();
+    if (!result.success || !result.groups) {
+        console.warn(`[Bot] Could not refresh connected mess groups: ${result.error || 'unknown error'}`);
+        return [...connectedGroupIds];
+    }
+    connectedGroupIds = new Set(result.groups.map((group) => group.id));
+    return [...connectedGroupIds];
+}
 // Type "reset" in the running bot terminal to request a new WhatsApp QR code.
 const terminal = readline_1.default.createInterface({ input: process.stdin, output: process.stdout });
 console.log('⌨️  WhatsApp নতুন করে লিংক করতে এই টার্মিনালে reset লিখে Enter চাপুন।');
@@ -394,60 +403,31 @@ async function startBot() {
                 groupList.forEach((g) => {
                     console.log(`  • "${g.subject}" (ID: ${g.id})`);
                 });
-                // Determine target group
-                if (config_js_1.CONFIG.WHATSAPP_GROUP_ID) {
-                    activeGroupJid = config_js_1.CONFIG.WHATSAPP_GROUP_ID;
-                    console.log(`\n🎯 Using configured WHATSAPP_GROUP_ID: ${activeGroupJid}`);
-                }
-                else if (config_js_1.CONFIG.WHATSAPP_GROUP_NAME) {
-                    const match = groupList.find((g) => g.subject.toLowerCase() === config_js_1.CONFIG.WHATSAPP_GROUP_NAME.toLowerCase());
-                    if (match) {
-                        activeGroupJid = match.id;
-                        console.log(`\n🎯 Matched group by name "${config_js_1.CONFIG.WHATSAPP_GROUP_NAME}": ${activeGroupJid}`);
-                    }
-                    else {
-                        console.warn(`\n⚠️ Group named "${config_js_1.CONFIG.WHATSAPP_GROUP_NAME}" not found.`);
-                    }
-                }
-                if (!activeGroupJid && groupList.length > 0) {
-                    activeGroupJid = groupList[0].id;
-                    console.log(`\n👉 Automatically targeting first group: "${groupList[0].subject}" (${activeGroupJid})`);
-                }
-                // Fetch participants and allow initial connection events to settle.
-                // Presence subscriptions do not verify Signal send sessions.
-                if (activeGroupJid) {
-                    console.log('\n⏳ Warming up Signal sessions with group participants...');
+                const registeredGroups = await refreshConnectedGroups();
+                console.log(`\n🎯 ${registeredGroups.length} connected mess group(s) loaded from website.`);
+                // Fetch participants for each registered group and allow Signal sessions to settle.
+                for (const groupJid of registeredGroups) {
                     try {
-                        const groupMeta = await sock.groupMetadata(activeGroupJid);
-                        const participants = groupMeta.participants.map((p) => p.id);
-                        console.log(`   Found ${participants.length} participant(s) in group`);
-                        // Subscribe to presence: this establishes Signal sessions
-                        for (const jid of participants) {
+                        const groupMeta = await sock.groupMetadata(groupJid);
+                        for (const participant of groupMeta.participants) {
                             try {
-                                await sock.presenceSubscribe(jid);
+                                await sock.presenceSubscribe(participant.id);
                             }
                             catch {
-                                // Ignore individual failures
+                                // Presence subscription is a best-effort warmup only.
                             }
                         }
-                        // Give sessions time to be negotiated
-                        await new Promise((r) => setTimeout(r, 3000));
-                        console.log('✅ Connection warmup complete. Test a command to confirm message sending.');
                     }
                     catch (warmupErr) {
-                        console.warn('[Warmup] Could not fetch group metadata:', warmupErr);
-                        await new Promise((r) => setTimeout(r, 3000));
-                        console.log('✅ Connection warmup complete (basic).');
+                        console.warn(`[Warmup] Could not fetch group metadata for ${groupJid}:`, warmupErr);
                     }
                 }
-                else {
-                    await new Promise((r) => setTimeout(r, 3000));
-                    console.log('✅ Connection warmup complete. Test a command to confirm message sending.');
-                }
+                await new Promise((r) => setTimeout(r, 3000));
+                console.log('✅ Connection warmup complete. New groups can be connected with !connect CODE.');
                 // Start background scheduler
                 if (generation !== connectionGeneration)
                     return;
-                (0, scheduler_js_1.setupScheduler)(sock, () => activeGroupJid);
+                (0, scheduler_js_1.setupScheduler)(sock, refreshConnectedGroups);
             }
             catch (err) {
                 console.error('[WhatsApp] Error fetching groups:', err);
@@ -495,7 +475,8 @@ async function startBot() {
             if (!text.startsWith('!') || msg.key.fromMe || type !== 'notify')
                 continue;
             const isLinkCommand = /^!\s*link(?:\s+|$)/i.test(text.trim());
-            console.log(`[CMD] Received in ${remoteJid}: "${isLinkCommand ? '!link [hidden]' : text}"`);
+            const isConnectCommand = /^!\s*connect(?:\s+|$)/i.test(text.trim());
+            console.log(`[CMD] Received in ${remoteJid}: "${isLinkCommand || isConnectCommand ? text.replace(/\s+[a-f0-9]{16}\s*$/i, ' [hidden]') : text}"`);
             const cmd = text.trim().toLowerCase().replace(/\s+/g, '-');
             // Helper: retry sendMessage up to 3 times on transient 'not-acceptable' errors
             const safeSend = async (jid, content, retries = 3) => {
@@ -518,11 +499,35 @@ async function startBot() {
                 }
             };
             try {
-                if (isLinkCommand) {
-                    if (!activeGroupJid || remoteJid !== activeGroupJid) {
-                        await safeSend(remoteJid, { text: '❌ এই মেসের WhatsApp গ্রুপে !link CODE পাঠান।' });
+                if (isConnectCommand) {
+                    const code = text.trim().match(/^!\s*connect\s+([a-f0-9]{16})\s*$/i)?.[1];
+                    if (!code) {
+                        await safeSend(remoteJid, { text: '❌ ওয়েবসাইটের Settings থেকে পাওয়া ১৬ অক্ষরের code দিয়ে লিখুন: !connect CODE' });
                         continue;
                     }
+                    let groupName;
+                    try {
+                        groupName = (await sock.groupMetadata(remoteJid)).subject;
+                    }
+                    catch {
+                        // The group ID is still enough to complete a connection.
+                    }
+                    const result = await apiClient_js_1.apiClient.connectGroup(code, remoteJid, groupName);
+                    if (result.success)
+                        connectedGroupIds.add(remoteJid);
+                    await safeSend(remoteJid, {
+                        text: result.success
+                            ? `✅ *${result.messName}* মেসের সঙ্গে এই WhatsApp group যুক্ত হয়েছে। এখন member link ও automatic poll চালু থাকবে।`
+                            : `❌ ${result.error || 'গ্রুপ যুক্ত করা যায়নি।'}`,
+                    });
+                    continue;
+                }
+                const connected = connectedGroupIds.has(remoteJid) || (await refreshConnectedGroups()).includes(remoteJid);
+                if (!connected) {
+                    await safeSend(remoteJid, { text: '❌ এই group এখনো কোনো mess-এর সঙ্গে যুক্ত নয়। Website Settings থেকে connect code নিয়ে !connect CODE পাঠান।' });
+                    continue;
+                }
+                if (isLinkCommand) {
                     const senderJid = msg.key.participant;
                     const code = text.trim().match(/^!\s*link\s+([a-f0-9]{16})\s*$/i)?.[1];
                     if (!code) {
@@ -590,7 +595,7 @@ async function startBot() {
                 }
                 else if (cmd === '!help') {
                     await safeSend(remoteJid, {
-                        text: `📋 *বট কমান্ড লিস্ট:*\n• \`!link CODE\` - ওয়েবসাইটের কোড দিয়ে অ্যাকাউন্ট যুক্ত করুন\n• \`!status\` - বটের অবস্থা দেখুন\n• \`!poll-lunch\` বা \`!lunch\` - দুপুরের পোল পাঠান\n• \`!poll-dinner\` বা \`!dinner\` - রাতের পোল পাঠান\n• \`!lock-lunch\` - দুপুরের পোল লক করুন\n• \`!lock-dinner\` - রাতের পোল লক করুন\n• \`!summary\` - আজকের মিলের সামারি দেখুন`,
+                        text: `📋 *বট কমান্ড লিস্ট:*\n• \`!connect CODE\` - Settings-এর code দিয়ে এই group যুক্ত করুন\n• \`!link CODE\` - ওয়েবসাইটের কোড দিয়ে অ্যাকাউন্ট যুক্ত করুন\n• \`!status\` - বটের অবস্থা দেখুন\n• \`!poll-lunch\` বা \`!lunch\` - দুপুরের পোল পাঠান\n• \`!poll-dinner\` বা \`!dinner\` - রাতের পোল পাঠান\n• \`!lock-lunch\` - দুপুরের পোল লক করুন\n• \`!lock-dinner\` - রাতের পোল লক করুন\n• \`!summary\` - আজকের মিলের সামারি দেখুন`,
                     });
                 }
             }

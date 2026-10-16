@@ -16,7 +16,10 @@ model Mess {
   password    String
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
-  whatsappGroupId   String?
+  whatsappGroupId            String?   @unique
+  whatsappGroupName          String?
+  groupConnectCodeHash       String?
+  groupConnectCodeExpiresAt  DateTime?
   members     Member[]
   days        MealDay[]
   expenses    Expense[]
