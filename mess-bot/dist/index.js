@@ -130,23 +130,16 @@ async function resetWhatsAppSession() {
 }
 exports.messageStore = new Map();
 const msgRetryCounterCache = new node_cache_1.default();
-// In-memory store for automatic message tracking across chats and retries
+// In-memory store for automatic message tracking across chats and retries (RAM only, never writes to disk)
 const store = (0, baileys_1.makeInMemoryStore)({ logger: (0, pino_1.default)({ level: 'silent' }) });
-const STORE_FILE = path_1.default.resolve(process.cwd(), 'baileys_store.json');
+// Clean up any legacy disk store file to free storage and ensure privacy
+const legacyStoreFile = path_1.default.resolve(process.cwd(), 'baileys_store.json');
 try {
-    if (fs_1.default.existsSync(STORE_FILE)) {
-        store.readFromFile(STORE_FILE);
+    if (fs_1.default.existsSync(legacyStoreFile)) {
+        fs_1.default.unlinkSync(legacyStoreFile);
     }
 }
-catch (err) {
-    // ignore
-}
-setInterval(() => {
-    try {
-        store.writeToFile(STORE_FILE);
-    }
-    catch { }
-}, 10_000);
+catch { }
 // Preload today's polls into messageStore so retry requests can always decrypt them
 function preloadPollMessages() {
     try {

@@ -103,21 +103,16 @@ async function resetWhatsAppSession() {
 export const messageStore = new Map<string, proto.IMessage>()
 const msgRetryCounterCache = new NodeCache()
 
-// In-memory store for automatic message tracking across chats and retries
+// In-memory store for automatic message tracking across chats and retries (RAM only, never writes to disk)
 const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) as any })
-const STORE_FILE = path.resolve(process.cwd(), 'baileys_store.json')
+
+// Clean up any legacy disk store file to free storage and ensure privacy
+const legacyStoreFile = path.resolve(process.cwd(), 'baileys_store.json')
 try {
-  if (fs.existsSync(STORE_FILE)) {
-    store.readFromFile(STORE_FILE)
+  if (fs.existsSync(legacyStoreFile)) {
+    fs.unlinkSync(legacyStoreFile)
   }
-} catch (err) {
-  // ignore
-}
-setInterval(() => {
-  try {
-    store.writeToFile(STORE_FILE)
-  } catch {}
-}, 10_000)
+} catch {}
 
 // Preload today's polls into messageStore so retry requests can always decrypt them
 function preloadPollMessages() {
