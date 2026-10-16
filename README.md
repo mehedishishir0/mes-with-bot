@@ -141,9 +141,6 @@
 
 ## সাধারণ সমস্যা ও সমাধান
 
-### একই command-এ দুইবার reply আসে
-
-একই WhatsApp account দিয়ে দুইটি bot চালু থাকলে এটি হয়। Production VPS bot চালু থাকার সময় local computer-এ `pnpm run dev` চালাবেন না। পুরোনো local bot terminal-এ `Ctrl + C` চাপুন।
 
 ### Bot reply দিচ্ছে না
 
