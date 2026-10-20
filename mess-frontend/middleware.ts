@@ -7,7 +7,7 @@ const publicRoutes = ['/login', '/signup', '/', '/api/auth/login', '/api/auth/si
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  if (publicRoutes.includes(pathname) || pathname.startsWith('/_next') || pathname.includes('/favicon')) {
+  if (pathname.startsWith('/api/bot/') || publicRoutes.includes(pathname) || pathname.startsWith('/_next') || pathname.includes('/favicon')) {
     return NextResponse.next()
   }
 
