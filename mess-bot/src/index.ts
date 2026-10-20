@@ -20,6 +20,7 @@ import { apiClient } from './apiClient.js'
 import { CONFIG, getDhakaDate, getDhakaHourMinute } from './config.js'
 import { pollManager, revivePollBuffer } from './pollManager.js'
 import { pauseScheduler, setupScheduler } from './scheduler.js'
+import { marketDutyNotifier } from './marketDutyNotifier.js'
 
 // Handle transient Signal protocol / cipher negotiation warnings without terminating process
 process.on('uncaughtException', (err) => {
@@ -413,6 +414,15 @@ async function startBot() {
         // Start background scheduler
         if (generation !== connectionGeneration) return
         setupScheduler(sock, refreshConnectedGroups)
+
+        // Check and send market duty start notifications (if duty starts today and hasn't been notified yet)
+        for (const groupJid of registeredGroups) {
+          try {
+            await marketDutyNotifier.checkAndNotifyMarketDuty(sock, groupJid)
+          } catch (dutyErr) {
+            console.warn(`[Market Duty] Startup check failed for ${groupJid}:`, dutyErr)
+          }
+        }
       } catch (err) {
         console.error('[WhatsApp] Error fetching groups:', err)
       }
@@ -580,9 +590,25 @@ async function startBot() {
           } else {
             await safeSend(remoteJid, { text: `❌ সামারি পাওয়া যায়নি: ${res.error}` })
           }
+        } else if (cmd === '!duty' || cmd === '!bajar' || cmd === '!bazar' || cmd === '!market') {
+          const dutyInfo = await marketDutyNotifier.getActiveDutySummaryText(sock, remoteJid)
+          await safeSend(remoteJid, {
+            text: dutyInfo.text,
+            mentions: dutyInfo.mentions,
+          })
+        } else if (cmd === '!test-duty' || cmd === '!testduty' || cmd === '!duty-test') {
+          await safeSend(remoteJid, { text: '🧪 বাজার ডিউটি নোটিফিকেশন প্রিভিউ তৈরি করা হচ্ছে...' })
+          await marketDutyNotifier.sendTestPreview(sock, remoteJid)
+        } else if (cmd === '!check-duty' || cmd === '!duty-notify' || cmd === '!dutynotify') {
+          const result = await marketDutyNotifier.checkAndNotifyMarketDuty(sock, remoteJid, true)
+          if (result.notifiedCount === 0 && !result.errors.length) {
+            await safeSend(remoteJid, { text: 'ℹ️ আজ কারো নতুন বাজার ডিউটি শুরু হয়নি।' })
+          } else if (result.errors.length) {
+            await safeSend(remoteJid, { text: `⚠️ ত্রুটি: ${result.errors.join(', ')}` })
+          }
         } else if (cmd === '!help') {
           await safeSend(remoteJid, {
-            text: `📋 *বট কমান্ড লিস্ট:*\n• \`!connect CODE\` - Settings-এর code দিয়ে এই group যুক্ত করুন\n• \`!link CODE\` - ওয়েবসাইটের কোড দিয়ে অ্যাকাউন্ট যুক্ত করুন\n• \`!status\` - বটের অবস্থা দেখুন\n• \`!poll-lunch\` বা \`!lunch\` - দুপুরের পোল পাঠান\n• \`!poll-dinner\` বা \`!dinner\` - রাতের পোল পাঠান\n• \`!lock-lunch\` - দুপুরের পোল লক করুন\n• \`!lock-dinner\` - রাতের পোল লক করুন\n• \`!summary\` - আজকের মিলের সামারি দেখুন`,
+            text: `📋 *বট কমান্ড লিস্ট:*\n• \`!connect CODE\` - Settings-এর code দিয়ে এই group যুক্ত করুন\n• \`!link CODE\` - ওয়েবসাইটের কোড দিয়ে অ্যাকাউন্ট যুক্ত করুন\n• \`!status\` - বটের অবস্থা দেখুন\n• \`!duty\` বা \`!bajar\` - আজকের বাজার ডিউটি দেখুন\n• \`!test-duty\` - বাজার ডিউটি নোটিশ টেস্ট করুন\n• \`!poll-lunch\` বা \`!lunch\` - দুপুরের পোল পাঠান\n• \`!poll-dinner\` বা \`!dinner\` - রাতের পোল পাঠান\n• \`!lock-lunch\` - দুপুরের পোল লক করুন\n• \`!lock-dinner\` - রাতের পোল লক করুন\n• \`!summary\` - আজকের মিলের সামারি দেখুন`,
           })
         }
       } catch (cmdErr) {

@@ -176,6 +176,69 @@ export class ApiClient {
       }
     }
   }
+
+  async getMarketDuties(groupId?: string, date?: string): Promise<MarketDutyResponse> {
+    const params = new URLSearchParams()
+    if (groupId) params.set('groupId', groupId)
+    if (date) params.set('date', date)
+
+    const url = `${this.baseUrl}/api/bot/market-duty?${params.toString()}`
+    try {
+      const res = await fetch(url, {
+        redirect: 'manual',
+        headers: {
+          'x-bot-secret': this.secretKey,
+        },
+      })
+      return await this.readJson<MarketDutyResponse>(res, url)
+    } catch (err) {
+      console.error('[ApiClient] Error getting market duties from website:', err)
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : 'Network error',
+      }
+    }
+  }
+}
+
+export type MarketDutyMember = {
+  id: string
+  externalId?: string
+  name: string
+  phone?: string | null
+  whatsappLid?: string | null
+  initials?: string
+  color?: string
+}
+
+export type MarketDutyItem = {
+  id: string
+  startDay: number
+  endDay: number
+  totalDays: number
+  daysRemaining: number
+  note?: string | null
+  member: MarketDutyMember
+}
+
+export type MarketDutyResponse = {
+  success: boolean
+  messName?: string
+  groupId?: string
+  date?: string
+  monthKey?: string
+  day?: number
+  startingDuties?: MarketDutyItem[]
+  activeDuties?: MarketDutyItem[]
+  allDuties?: MarketDutyItem[]
+  groups?: Array<{
+    groupId: string
+    messName: string
+    startingDuties: MarketDutyItem[]
+    activeDuties: MarketDutyItem[]
+    allDuties: MarketDutyItem[]
+  }>
+  error?: string
 }
 
 export const apiClient = new ApiClient()

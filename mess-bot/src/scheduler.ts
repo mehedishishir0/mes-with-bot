@@ -2,6 +2,7 @@ import cron from 'node-cron'
 import type { WASocket } from '@whiskeysockets/baileys'
 import { CONFIG } from './config.js'
 import { pollManager } from './pollManager.js'
+import { marketDutyNotifier } from './marketDutyNotifier.js'
 
 let isSchedulerRunning = false
 let currentSock: WASocket | null = null
@@ -40,6 +41,18 @@ export function setupScheduler(sock: WASocket, getGroupJids: () => Promise<strin
       }
     }
   }
+
+  // 00:00 (12:00 AM Midnight) -> Check and send Market Duty start notification
+  cron.schedule(
+    '0 0 * * *',
+    async () => {
+      console.log('[Scheduler] 12:00 AM: Checking Market Duty Start Notifications...')
+      await runForGroups('Market Duty notification', async (socket, groupJid) => {
+        await marketDutyNotifier.checkAndNotifyMarketDuty(socket, groupJid)
+      })
+    },
+    { timezone }
+  )
 
   // 00:10 -> Send Lunch Poll
   cron.schedule(
@@ -99,7 +112,8 @@ export function setupScheduler(sock: WASocket, getGroupJids: () => Promise<strin
     { timezone }
   )
 
-  console.log('[Scheduler] All 6 daily routines scheduled successfully:')
+  console.log('[Scheduler] All daily routines scheduled successfully:')
+  console.log('  • 00:00 (12:00 AM) -> বাজার ডিউটি শুরুর নোটিফিকেশন যাবে')
   console.log('  • 00:10 (12:10 AM) -> দুপুরের মিলের পোল যাবে')
   console.log('  • 09:45 (09:45 AM) -> দুপুরের ভোটের সতর্কবার্তা যাবে')
   console.log('  • 10:00 (10:00 AM) -> দুপুরের মিল লক হবে')
