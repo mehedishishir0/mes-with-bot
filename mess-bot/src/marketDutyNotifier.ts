@@ -161,17 +161,17 @@ class MarketDutyNotifier {
     const lines = [
       `🛒 *মেসের বাজার ডিউটি রোস্টার ও ক্যালেন্ডার* 📅`,
       `━━━━━━━━━━━━━━━━━━━━━━`,
-      `🔔 *আজ থেকে নতুন বাজার ডিউটি শুরু!*`,
+      `🔔 *আগামীকাল থেকে নতুন বাজার ডিউটি শুরু!*`,
       ``,
       `সালাম ${mentionTag} (${duty.member.name}) ভাই,`,
-      `আজ (${duty.startDay} তারিখ) থেকে আপনার মেসের বাজার ডিউটি শুরু হয়েছে।`,
+      `আগামীকাল (${duty.startDay} তারিখ) থেকে আপনার মেসের বাজার ডিউটি শুরু হবে।`,
       ``,
       `📋 *বাজার সময়সূচি ও বিবরণ:*`,
       `──────────────────────`,
       `👤 *বাজারের দায়িত্বে:* ${mentionTag} (*${duty.member.name}*)`,
       `🗓️ *ডিউটি সময়কাল:* ${dateRangeText}`,
       `⏳ *মোট মেয়াদ:* ${duty.totalDays} দিন`,
-      `📌 *স্ট্যাটাস:* আজ ১ম দিন (ডিউটি শুরু)`,
+      `📌 *স্ট্যাটাস:* আগামীকাল ১ম দিন (ডিউটি শুরু)`,
       duty.note ? `📝 *বাজার নোট:* ${duty.note}` : null,
       `──────────────────────`,
       ``,
@@ -191,13 +191,13 @@ class MarketDutyNotifier {
     groupJid: string,
     force = false
   ): Promise<{ notifiedCount: number; errors: string[] }> {
-    const today = getDhakaDate()
+    const tomorrow = getDhakaDate(1)
     const errors: string[] = []
     let notifiedCount = 0
 
     try {
-      console.log(`[MarketDutyNotifier] Checking market duties for ${groupJid} on date: ${today}`)
-      const res = await apiClient.getMarketDuties(groupJid, today)
+      console.log(`[MarketDutyNotifier] Checking tomorrow's market duties for ${groupJid} on date: ${tomorrow}`)
+      const res = await apiClient.getMarketDuties(groupJid, tomorrow)
 
       if (!res.success) {
         console.warn(`[MarketDutyNotifier] Could not fetch market duties for ${groupJid}: ${res.error}`)
@@ -206,7 +206,7 @@ class MarketDutyNotifier {
 
       const startingDuties = res.startingDuties || []
       if (!startingDuties.length) {
-        console.log(`[MarketDutyNotifier] No market duty starting today (${today}) for ${groupJid}`)
+        console.log(`[MarketDutyNotifier] No market duty starting tomorrow (${tomorrow}) for ${groupJid}`)
         return { notifiedCount: 0, errors: [] }
       }
 
@@ -219,23 +219,23 @@ class MarketDutyNotifier {
       }
 
       for (const duty of startingDuties) {
-        const alreadyNotified = this.isDutyNotified(groupJid, duty.id, today)
+        const alreadyNotified = this.isDutyNotified(groupJid, duty.id, tomorrow)
         if (alreadyNotified && !force) {
-          console.log(`[MarketDutyNotifier] Duty ${duty.id} (${duty.member.name}) was already notified for ${today}. Skipping.`)
+          console.log(`[MarketDutyNotifier] Duty ${duty.id} (${duty.member.name}) was already notified for ${tomorrow}. Skipping.`)
           continue
         }
 
         const { mentionTag, mentionJids } = this.resolveMemberMention(duty.member, participantIds)
-        const messageText = this.buildDutyStartMessage(duty, mentionTag, res.monthKey || today.slice(0, 7))
+        const messageText = this.buildDutyStartMessage(duty, mentionTag, res.monthKey || tomorrow.slice(0, 7))
 
         try {
           await sock.sendMessage(groupJid, {
             text: messageText,
             mentions: mentionJids,
           })
-          this.markDutyNotified(groupJid, duty.id, today, duty.member.name)
+          this.markDutyNotified(groupJid, duty.id, tomorrow, duty.member.name)
           notifiedCount++
-          console.log(`[MarketDutyNotifier] ✅ Sent market duty start notification for ${duty.member.name} to ${groupJid}`)
+          console.log(`[MarketDutyNotifier] ✅ Sent advance market duty notification for ${duty.member.name} to ${groupJid}`)
         } catch (sendErr: any) {
           console.error(`[MarketDutyNotifier] Failed to send notification for ${duty.member.name}:`, sendErr)
           errors.push(sendErr?.message || String(sendErr))
@@ -308,8 +308,8 @@ class MarketDutyNotifier {
   }
 
   async sendTestPreview(sock: WASocket, groupJid: string): Promise<boolean> {
-    const today = getDhakaDate()
-    const res = await apiClient.getMarketDuties(groupJid, today)
+    const tomorrow = getDhakaDate(1)
+    const res = await apiClient.getMarketDuties(groupJid, tomorrow)
     if (!res.success) {
       await sock.sendMessage(groupJid, { text: `❌ বাজার ডেটা লোড করা যায়নি: ${res.error}` })
       return false
@@ -334,7 +334,7 @@ class MarketDutyNotifier {
 
     const { mentionTag, mentionJids } = this.resolveMemberMention(duty.member, participantIds)
     const previewMessage = `🧪 *[টেস্ট প্রিভিউ - বাজার ডিউটি নোটিশ]*\n\n` +
-      this.buildDutyStartMessage(duty, mentionTag, res.monthKey || today.slice(0, 7))
+      this.buildDutyStartMessage(duty, mentionTag, res.monthKey || tomorrow.slice(0, 7))
 
     await sock.sendMessage(groupJid, {
       text: previewMessage,

@@ -12,13 +12,14 @@ export const CONFIG = {
   AUTH_DIR: path.resolve(process.cwd(), 'auth_info'),
 }
 
-export function getDhakaDate(): string {
+export function getDhakaDate(offsetDays: number = 0): string {
+  const target = new Date(Date.now() + offsetDays * 86_400_000)
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: CONFIG.TIMEZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(new Date())
+  }).formatToParts(target)
 
   const value = (type: string) => parts.find((p) => p.type === type)?.value ?? ''
   return `${value('year')}-${value('month')}-${value('day')}`

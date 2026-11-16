@@ -17,13 +17,14 @@ exports.CONFIG = {
     TIMEZONE: process.env.TIMEZONE || 'Asia/Dhaka',
     AUTH_DIR: path_1.default.resolve(process.cwd(), 'auth_info'),
 };
-function getDhakaDate() {
+function getDhakaDate(offsetDays = 0) {
+    const target = new Date(Date.now() + offsetDays * 86_400_000);
     const parts = new Intl.DateTimeFormat('en-US', {
         timeZone: exports.CONFIG.TIMEZONE,
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
-    }).formatToParts(new Date());
+    }).formatToParts(target);
     const value = (type) => parts.find((p) => p.type === type)?.value ?? '';
     return `${value('year')}-${value('month')}-${value('day')}`;
 }

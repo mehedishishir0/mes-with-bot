@@ -125,6 +125,30 @@ class ApiClient {
             };
         }
     }
+    async getMarketDuties(groupId, date) {
+        const params = new URLSearchParams();
+        if (groupId)
+            params.set('groupId', groupId);
+        if (date)
+            params.set('date', date);
+        const url = `${this.baseUrl}/api/bot/market-duty?${params.toString()}`;
+        try {
+            const res = await fetch(url, {
+                redirect: 'manual',
+                headers: {
+                    'x-bot-secret': this.secretKey,
+                },
+            });
+            return await this.readJson(res, url);
+        }
+        catch (err) {
+            console.error('[ApiClient] Error getting market duties from website:', err);
+            return {
+                success: false,
+                error: err instanceof Error ? err.message : 'Network error',
+            };
+        }
+    }
 }
 exports.ApiClient = ApiClient;
 exports.apiClient = new ApiClient();
