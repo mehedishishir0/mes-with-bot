@@ -42,18 +42,6 @@ export function setupScheduler(sock: WASocket, getGroupJids: () => Promise<strin
     }
   }
 
-  // 00:00 (12:00 AM Midnight) -> Check and send Market Duty start notification
-  cron.schedule(
-    '0 0 * * *',
-    async () => {
-      console.log('[Scheduler] 12:00 AM: Checking Market Duty Start Notifications...')
-      await runForGroups('Market Duty notification', async (socket, groupJid) => {
-        await marketDutyNotifier.checkAndNotifyMarketDuty(socket, groupJid)
-      })
-    },
-    { timezone }
-  )
-
   // 00:10 -> Send Lunch Poll
   cron.schedule(
     '10 0 * * *',
@@ -112,13 +100,25 @@ export function setupScheduler(sock: WASocket, getGroupJids: () => Promise<strin
     { timezone }
   )
 
+  // 5. Afternoon 04:30 PM (16:30) -> Check and send Market Duty start notification for tomorrow
+  cron.schedule(
+    '30 16 * * *',
+    async () => {
+      console.log('[Scheduler] 04:30 PM: Checking Market Duty Advance Notifications for tomorrow...')
+      await runForGroups('Market Duty notification', async (socket, groupJid) => {
+        await marketDutyNotifier.checkAndNotifyMarketDuty(socket, groupJid)
+      })
+    },
+    { timezone }
+  )
+
   console.log('[Scheduler] All daily routines scheduled successfully:')
-  console.log('  • 00:00 (12:00 AM) -> বাজার ডিউটি শুরুর নোটিফিকেশন যাবে')
   console.log('  • 00:10 (12:10 AM) -> দুপুরের মিলের পোল যাবে')
   console.log('  • 09:45 (09:45 AM) -> দুপুরের ভোটের সতর্কবার্তা যাবে')
   console.log('  • 10:00 (10:00 AM) -> দুপুরের মিল লক হবে')
   console.log('  • 11:00 (11:00 AM) -> রাতের মিলের পোল যাবে')
   console.log('  • 14:45 (02:45 PM) -> রাতের ভোটের সতর্কবার্তা যাবে')
   console.log('  • 15:00 (03:00 PM) -> রাতের মিল লক হবে')
+  console.log('  • 16:30 (04:30 PM) -> আগামীকালের বাজার ডিউটির নোটিফিকেশন যাবে')
 }
 

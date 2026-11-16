@@ -1,6 +1,4 @@
 # Local credentials and environment configuration
-.env
-.env.*
 !.env.example
 
 # WhatsApp login keys and locally cached message data
@@ -14,3 +12,4 @@ node_modules/
 .vercel/
 *.tsbuildinfo
 *.log
+config.bat

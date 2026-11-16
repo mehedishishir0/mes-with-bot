@@ -415,12 +415,17 @@ async function startBot() {
         if (generation !== connectionGeneration) return
         setupScheduler(sock, refreshConnectedGroups)
 
-        // Check and send market duty start notifications (if duty starts today and hasn't been notified yet)
-        for (const groupJid of registeredGroups) {
-          try {
-            await marketDutyNotifier.checkAndNotifyMarketDuty(sock, groupJid)
-          } catch (dutyErr) {
-            console.warn(`[Market Duty] Startup check failed for ${groupJid}:`, dutyErr)
+        // Check and send market duty advance notifications (if duty starts tomorrow, not yet notified, and current time is >= 4:30 PM)
+        const { hour: currentHour, minute: currentMinute } = getDhakaHourMinute()
+        const isPastDutyNotifyTime = currentHour > 16 || (currentHour === 16 && currentMinute >= 30)
+
+        if (isPastDutyNotifyTime) {
+          for (const groupJid of registeredGroups) {
+            try {
+              await marketDutyNotifier.checkAndNotifyMarketDuty(sock, groupJid)
+            } catch (dutyErr) {
+              console.warn(`[Market Duty] Startup check failed for ${groupJid}:`, dutyErr)
+            }
           }
         }
       } catch (err) {
@@ -602,7 +607,7 @@ async function startBot() {
         } else if (cmd === '!check-duty' || cmd === '!duty-notify' || cmd === '!dutynotify') {
           const result = await marketDutyNotifier.checkAndNotifyMarketDuty(sock, remoteJid, true)
           if (result.notifiedCount === 0 && !result.errors.length) {
-            await safeSend(remoteJid, { text: 'ℹ️ আজ কারো নতুন বাজার ডিউটি শুরু হয়নি।' })
+            await safeSend(remoteJid, { text: 'ℹ️ আগামীকাল কারো নতুন বাজার ডিউটি শুরু নেই।' })
           } else if (result.errors.length) {
             await safeSend(remoteJid, { text: `⚠️ ত্রুটি: ${result.errors.join(', ')}` })
           }

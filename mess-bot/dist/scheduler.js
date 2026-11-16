@@ -8,6 +8,7 @@ exports.setupScheduler = setupScheduler;
 const node_cron_1 = __importDefault(require("node-cron"));
 const config_js_1 = require("./config.js");
 const pollManager_js_1 = require("./pollManager.js");
+const marketDutyNotifier_js_1 = require("./marketDutyNotifier.js");
 let isSchedulerRunning = false;
 let currentSock = null;
 let currentGetGroupJids = null;
@@ -70,11 +71,19 @@ function setupScheduler(sock, getGroupJids) {
         console.log('[Scheduler] 03:00 PM: Locking Dinner Poll...');
         await runForGroups('Dinner lock', async (socket, groupJid) => pollManager_js_1.pollManager.lockDinnerPoll(socket, groupJid));
     }, { timezone });
-    console.log('[Scheduler] All 6 daily routines scheduled successfully:');
+    // 5. Afternoon 04:30 PM (16:30) -> Check and send Market Duty start notification for tomorrow
+    node_cron_1.default.schedule('30 16 * * *', async () => {
+        console.log('[Scheduler] 04:30 PM: Checking Market Duty Advance Notifications for tomorrow...');
+        await runForGroups('Market Duty notification', async (socket, groupJid) => {
+            await marketDutyNotifier_js_1.marketDutyNotifier.checkAndNotifyMarketDuty(socket, groupJid);
+        });
+    }, { timezone });
+    console.log('[Scheduler] All daily routines scheduled successfully:');
     console.log('  • 00:10 (12:10 AM) -> দুপুরের মিলের পোল যাবে');
     console.log('  • 09:45 (09:45 AM) -> দুপুরের ভোটের সতর্কবার্তা যাবে');
     console.log('  • 10:00 (10:00 AM) -> দুপুরের মিল লক হবে');
     console.log('  • 11:00 (11:00 AM) -> রাতের মিলের পোল যাবে');
     console.log('  • 14:45 (02:45 PM) -> রাতের ভোটের সতর্কবার্তা যাবে');
     console.log('  • 15:00 (03:00 PM) -> রাতের মিল লক হবে');
+    console.log('  • 16:30 (04:30 PM) -> আগামীকালের বাজার ডিউটির নোটিফিকেশন যাবে');
 }
